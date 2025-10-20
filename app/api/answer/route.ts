@@ -4,28 +4,40 @@ import { db } from "@/lib/db";
 import { submissions, teams, contentClues } from "@/lib/schema";
 import { eq } from "drizzle-orm";
 
+type Body = {
+  teamId?: string;
+  digit?: number;
+  clueId?: string;
+  timeLeftAtSubmit?: number;
+};
+
 export async function POST(req: Request) {
-  const body = (await req.json()) as {
-    teamId?: string;
-    digit?: number;
-    clueId?: string;
-    timeLeftAtSubmit?: number;
-  };
+  const body = (await req.json()) as Body;
 
-  if (!body.teamId) return NextResponse.json({ error: "teamId missing" }, { status: 400 });
-  if (typeof body.digit !== "number") return NextResponse.json({ error: "digit missing" }, { status: 400 });
-  if (!body.clueId) return NextResponse.json({ error: "clueId missing" }, { status: 400 });
+  if (!body.teamId) {
+    return NextResponse.json({ error: "teamId missing" }, { status: 400 });
+  }
+  if (typeof body.digit !== "number") {
+    return NextResponse.json({ error: "digit missing" }, { status: 400 });
+  }
+  if (!body.clueId) {
+    return NextResponse.json({ error: "clueId missing" }, { status: 400 });
+  }
 
-  // Hämta förväntad siffra
+  // Hämta förväntad siffra för vald ledtråd
   const clueRows = await db
     .select({ expectedDigit: contentClues.expectedDigit })
     .from(contentClues)
     .where(eq(contentClues.id, body.clueId));
 
-  if (clueRows.length === 0) return NextResponse.json({ error: "clue not found" }, { status: 404 });
+  const clue = clueRows[0];
+  if (!clue) {
+    return NextResponse.json({ error: "clue not found" }, { status: 404 });
+  }
 
-  const isCorrect = clueRows[0].expectedDigit === body.digit;
+  const isCorrect = clue.expectedDigit === body.digit;
 
+  // Spara submissionen
   const [saved] = await db
     .insert(submissions)
     .values({
@@ -36,13 +48,19 @@ export async function POST(req: Request) {
     })
     .returning();
 
-  // (valfritt) uppdatera team.step / penalties beroende på om svaret är rätt
+  // Om rätt svar: öka teamets steg på ett säkert sätt (utan sql-template)
   if (isCorrect) {
+    const current = await db
+      .select({ step: teams.step })
+      .from(teams)
+      .where(eq(teams.id, body.teamId));
+
+    const currentStep = current[0]?.step ?? 0;
+
     await db
       .update(teams)
-      .set({ step: (/* @ts-expect-error */ (undefined as never)) })
+      .set({ step: currentStep + 1 })
       .where(eq(teams.id, body.teamId));
-    // ↑ Lämna tomt — fyll i logiken när du vet hur steg ska räknas
   }
 
   return NextResponse.json({ ok: true, submission: saved, correct: isCorrect });

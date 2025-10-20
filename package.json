@@ -7,7 +7,9 @@
     "build": "next build",
     "start": "next start -p 3000",
     "db:apply": "node --import=tsx lib/db.ts migrate",
-    "db:seed": "node --import=tsx lib/db.ts seed"
+    "db:seed": "node --import=tsx lib/db.ts seed",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate"
   },
   "dependencies": {
     "@neondatabase/serverless": "^0.10.3",
@@ -32,3 +34,4 @@
     "typescript": "^5.9.3"
   }
 }
+

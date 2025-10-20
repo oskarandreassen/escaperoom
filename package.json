@@ -1,0 +1,27 @@
+{
+  "name": "telia-halloween-escaperoom",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev -p 3000",
+    "build": "next build",
+    "start": "next start -p 3000",
+    "db:apply": "node --import=tsx lib/db.ts migrate",
+    "db:seed": "node --import=tsx lib/db.ts seed"
+  },
+  "dependencies": {
+    "@neondatabase/serverless": "^0.10.3",
+    "@vercel/kv": "^1.0.1",
+    "lucide-react": "^0.454.0",
+    "nanoid": "^5.0.7",
+    "next": "14.2.9",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "zod": "^3.23.8",
+    "cookie": "^0.6.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3"
+  }
+}

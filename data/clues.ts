@@ -35,6 +35,39 @@ export const CLUES: ClueConfig[] = [
     durationSec: 5 * 60,
     active: true,
   },
+    {
+    id: "clue_medicinecabinet",
+    title: "Medicinskåp"
+    icon: "🚑" ,
+    riddle:
+    "När smärtan är nära, är lindringen gömd, \nBakom det som lindar hand, tår och fingrar \n I skåpet där vård blir till tröst, \n sök där det mjuka döljer sin röst.",
+    type: "code",
+    expected: "9", 
+    durationSec: 5 * 60,
+    active: true,
+  },
+  {
+    id: "clue_toiletpaper",
+    title: "Toalettpapper",
+    icon: "🧻",
+    riddle:
+      "Rullar av vitt, en mjuk spiral,\nI badrummets vrå, en tyst ritual.\nNär nöden kallar, där den finns,\nSök där pappret i cirklar spinns.",
+    type: "code",
+    expected: "2",
+    durationSec: 5 * 60,
+    active: true,
+  },
+  {
+    id: "math_clue",
+    title: "Mattegåta",
+    icon: "➗",
+    riddle:
+    "Dags för en mattefråga, svaret på denna ger er nästa siffra i koden \n (8+4) / 3-1 = ?"  
+    type: "code",
+    expected: "3",
+    durationSec: 5 * 60,
+    active: true,
+  },
   // Lägg till fler ledtrådar här – bara följ mallen
 ];
 

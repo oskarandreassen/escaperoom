@@ -1,4 +1,6 @@
 // app/api/team/status/route.ts
+export const runtime = "nodejs";
+
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { teams } from "@/lib/schema";

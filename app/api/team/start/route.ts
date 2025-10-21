@@ -1,4 +1,6 @@
 // app/api/team/start/route.ts
+export const runtime = "nodejs";
+
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { teams } from "@/lib/schema";
@@ -15,7 +17,7 @@ export async function POST(req: Request) {
 
     const teamName = rawName.trim().slice(0, 64);
 
-    // valfritt men trevligt: förhindra dubbletter
+    // förhindra dubbletter
     const exists = await db
       .select({ id: teams.id })
       .from(teams)

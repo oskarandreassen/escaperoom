@@ -62,7 +62,7 @@ export const CLUES: ClueConfig[] = [
     title: "Mattegåta",
     icon: "➗",
     riddle:
-    "Dags för en mattefråga, svaret på denna ger er nästa siffra i koden \n (8+4) / 3-1 = ?"  
+    "Dags för en mattefråga, svaret på denna ger er nästa siffra i koden \n (8+4) / 3-1 = ?",  
     type: "code",
     expected: "3",
     durationSec: 5 * 60,

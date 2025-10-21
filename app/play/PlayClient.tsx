@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 
 type CurrentOk =
@@ -179,25 +179,32 @@ export default function PlayClient() {
     else setAnswer((prev) => (prev + String(n)).slice(0, 8));
   }
 
-  // --- UI (som tidigare snygga versionen) ---
+  // ===== UI =====
   return (
-    <main className="min-h-[100dvh] bg-gradient-to-b from-black via-[#0b0c11] to-[#0b0c11] text-white">
-      <div className="mx-auto w-full max-w-6xl px-4 py-8">
-        <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-baseline gap-3">
-            <span className="rounded-xl bg-orange-500/10 px-3 py-1 text-sm font-semibold text-orange-300">
+    <div className="min-h-[100dvh] bg-[radial-gradient(1200px_600px_at_20%_-10%,rgba(255,130,30,0.12),transparent),radial-gradient(1200px_600px_at_90%_-10%,rgba(120,60,255,0.10),transparent)] bg-[#0b0c11] text-white">
+      {/* Top bar */}
+      <header className="sticky top-0 z-10 backdrop-blur supports-[backdrop-filter]:bg-black/30 bg-black/40 border-b border-white/10">
+        <div className="mx-auto max-w-6xl px-4 py-3 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span className="rounded-lg bg-orange-500/15 px-2.5 py-1 text-xs font-semibold text-orange-300 select-none">
               Halloween Escaperoom
             </span>
-            <h1 className="text-2xl font-bold tracking-tight">Vågar ni gå in?</h1>
+            <span className="hidden sm:block text-sm opacity-70">Vågar ni gå in?</span>
           </div>
           {!finished && (
-            <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-2 text-2xl font-bold tabular-nums shadow-sm">
+            <div
+              aria-live="polite"
+              className="rounded-xl border border-white/10 bg-white/10 px-3 py-1.5 text-xl font-bold tabular-nums shadow"
+            >
               {mmss(timeLeft)}
             </div>
           )}
         </div>
+      </header>
 
-        <div className="mb-6 text-sm opacity-80">
+      <main className="mx-auto max-w-6xl px-4 pb-[6.5rem] sm:pb-10 pt-6">
+        {/* Progress */}
+        <div className="mb-4 text-sm opacity-80">
           Ledtråd{" "}
           <span className="font-semibold">
             {Math.min(step + 1, Math.max(total, 1))}/{Math.max(total, 1)}
@@ -207,37 +214,57 @@ export default function PlayClient() {
         {loading ? (
           <div className="rounded-2xl border border-white/10 bg-white/5 p-6">Laddar…</div>
         ) : error ? (
-          <div className="rounded-2xl border border-red-500/30 bg-red-900/20 p-6">{error}</div>
+          <div className="rounded-2xl border border-red-500/30 bg-red-900/25 p-6">{error}</div>
         ) : finished ? (
-          <div className="rounded-2xl border border-emerald-500/30 bg-emerald-900/20 p-6 shadow-lg">
-            <div className="mb-2 text-2xl font-semibold">🎉 Klart! Grymt jobbat.</div>
-            <div className="text-lg opacity-90">
-              Klar tid: <span className="font-semibold">{humanTime(totalTime ?? 0)}</span>
+          <section className="mx-auto max-w-2xl rounded-3xl border border-emerald-400/30 bg-gradient-to-b from-emerald-900/25 to-emerald-900/10 p-8 text-center shadow-2xl">
+            <div className="text-5xl mb-2">🎉</div>
+            <h2 className="text-2xl sm:text-3xl font-semibold mb-2">Klart! Grymt jobbat.</h2>
+            <p className="text-base opacity-90 mb-6">
+              Klar tid:{" "}
+              <span className="text-3xl font-bold tabular-nums align-middle">{humanTime(totalTime ?? 0)}</span>
+            </p>
+            <div className="flex flex-col sm:flex-row gap-3 justify-center">
+              <a
+                href="/"
+                className="inline-flex justify-center rounded-xl border border-white/10 bg-white/10 px-5 py-3 font-medium hover:bg-white/20"
+              >
+                ↩︎ Till startsidan
+              </a>
+              <button
+                onClick={() => {
+                  navigator.clipboard?.writeText(`Klar tid: ${humanTime(totalTime ?? 0)}`);
+                }}
+                className="inline-flex justify-center rounded-xl border border-emerald-400/40 bg-emerald-600/30 px-5 py-3 font-medium hover:bg-emerald-600/40"
+              >
+                📋 Kopiera klar tid
+              </button>
             </div>
-          </div>
+          </section>
         ) : (
-          <div className="grid gap-6 md:grid-cols-[1.3fr_1fr]">
-            <section className="rounded-2xl border border-white/10 bg-gradient-to-b from-white/5 to-white/0 p-6 shadow-xl">
-              <div className="mb-4 flex items-center gap-2">
+          <div className="grid gap-6 md:grid-cols-[1.25fr_1fr]">
+            {/* Riddle card */}
+            <section className="rounded-3xl border border-white/10 bg-gradient-to-b from-white/5 to-white/0 p-6 sm:p-8 shadow-xl">
+              <div className="mb-4 flex items-center gap-3">
                 <span className="text-2xl">{icon}</span>
-                <h2 className="text-xl font-semibold">{title}</h2>
-                <span className="ml-auto rounded-full border border-white/10 px-2 py-0.5 text-xs opacity-70">
+                <h2 className="text-xl sm:text-2xl font-semibold">{title}</h2>
+                <span className="ml-auto rounded-full border border-white/10 px-2.5 py-0.5 text-xs opacity-75">
                   {type === "digit" ? "1 siffra" : "Kod"}
                 </span>
               </div>
-              <div className="leading-relaxed opacity-95">
+              <article className="space-y-2 leading-relaxed opacity-95">
                 {riddle.split("\n").map((line, i) => (
-                  <p key={i} className="mb-2">
-                    {line}
-                  </p>
+                  <p key={i}>{line}</p>
                 ))}
-              </div>
+              </article>
             </section>
 
-            <section className="rounded-2xl border border-white/10 bg-white/5 p-6 shadow-xl">
-              <div className="mb-3 text-sm opacity-80">Skriv in svaret</div>
-
+            {/* Answer card */}
+            <section className="rounded-3xl border border-white/10 bg-white/5 p-6 sm:p-8 shadow-xl">
+              <label htmlFor="answer" className="mb-2 block text-sm opacity-80">
+                Skriv in svaret
+              </label>
               <input
+                id="answer"
                 inputMode="numeric"
                 pattern="[0-9]*"
                 value={answer}
@@ -245,47 +272,90 @@ export default function PlayClient() {
                   const v = e.target.value.replace(/\D/g, "");
                   setAnswer(type === "digit" ? v.slice(0, 1) : v.slice(0, 8));
                 }}
-                className="mb-4 w-full rounded-xl border border-white/10 bg-black/30 p-4 text-2xl tabular-nums outline-none focus:ring-2 focus:ring-white/20"
+                className="mb-5 w-full rounded-2xl border border-white/10 bg-black/30 p-4 text-2xl tabular-nums outline-none focus:ring-2 focus:ring-white/20"
                 placeholder={type === "digit" ? "En siffra (0–9)" : "Kod (endast siffror)"}
+                aria-label={type === "digit" ? "En siffra 0–9" : "Kod, endast siffror"}
               />
 
-              <div className="grid grid-cols-5 gap-2 mb-4">
-                {[1,2,3,4,5,6,7,8,9,0].map((n) => (
-                  <button
-                    key={n}
-                    className="rounded-xl border border-white/10 bg-white/10 py-3 text-lg font-semibold hover:bg-white/20 active:scale-[0.98] transition"
-                    onClick={() => tap(n)}
-                    type="button"
-                  >
+              {/* Desktop keypad */}
+              <div className="hidden sm:grid grid-cols-3 gap-2">
+                {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => (
+                  <Key key={n} onClick={() => tap(n)}>
                     {n}
-                  </button>
+                  </Key>
                 ))}
-                <button
-                  className="col-span-2 rounded-xl border border-white/10 bg-white/10 py-3 text-lg font-semibold hover:bg-white/20"
-                  onClick={() => setAnswer((p) => p.slice(0, -1))}
-                  type="button"
-                >
-                  ⌫ Radera
-                </button>
-                <button
-                  className="col-span-3 rounded-xl border border-emerald-400/40 bg-emerald-600/30 py-3 text-lg font-semibold hover:bg-emerald-600/40 disabled:opacity-60"
-                  onClick={submit}
+                <Key onClick={() => setAnswer((p) => p.slice(0, -1))}>⌫</Key>
+                <Key onClick={() => tap(0)}>0</Key>
+                <Key
+                  primary
                   disabled={submitting || answer.length === 0}
-                  type="button"
+                  onClick={submit}
+                  ariaLabel="Skicka svar"
                 >
-                  ✅ Skicka
-                </button>
+                  ✅
+                </Key>
               </div>
-
-              {feedback ? (
-                <div className="rounded-lg border border-white/10 bg-black/20 p-3 text-sm opacity-90">
-                  {feedback}
-                </div>
-              ) : null}
             </section>
           </div>
         )}
-      </div>
-    </main>
+      </main>
+
+      {/* Mobile docked keypad */}
+      {!finished && !loading && !error && (
+        <div className="fixed inset-x-0 bottom-0 z-20 border-t border-white/10 bg-black/50 backdrop-blur">
+          <div className="mx-auto max-w-6xl px-4 py-3 sm:hidden">
+            <div className="grid grid-cols-3 gap-2">
+              {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => (
+                <Key key={`m${n}`} onClick={() => tap(n)}>
+                  {n}
+                </Key>
+              ))}
+              <Key onClick={() => setAnswer((p) => p.slice(0, -1))}>⌫</Key>
+              <Key onClick={() => tap(0)}>0</Key>
+              <Key primary disabled={submitting || answer.length === 0} onClick={submit} ariaLabel="Skicka svar">
+                ✅
+              </Key>
+            </div>
+            {feedback ? (
+              <div className="mt-2 rounded-lg border border-white/10 bg-white/5 p-2 text-sm text-white/90">
+                {feedback}
+              </div>
+            ) : null}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Small keypad button */
+function Key({
+  children,
+  onClick,
+  disabled,
+  primary,
+  ariaLabel,
+}: {
+  children: React.ReactNode;
+  onClick?: () => void;
+  disabled?: boolean;
+  primary?: boolean;
+  ariaLabel?: string;
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={ariaLabel}
+      onClick={onClick}
+      disabled={disabled}
+      className={[
+        "rounded-2xl py-3 text-xl font-semibold transition active:scale-[0.98]",
+        "border border-white/10",
+        primary ? "bg-emerald-600/40 hover:bg-emerald-600/50" : "bg-white/10 hover:bg-white/20",
+        disabled ? "opacity-50 cursor-not-allowed" : "",
+      ].join(" ")}
+    >
+      {children}
+    </button>
   );
 }

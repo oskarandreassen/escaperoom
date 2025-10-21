@@ -1,160 +1,217 @@
 // app/play/page.tsx
-'use client';
+"use client";
 
-import { useEffect, useMemo, useRef, useState } from 'react';
-import Timer from '@/components/Timer';
+import { useEffect, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 
-type Clue = {
-  index: number;
-  title: string;
-  icon: string;
-  riddle: string;
-  locationHint?: string | null;
-  safetyHint?: string | null;
+type CurrentClueOk = {
+  ok: true;
+  team: { id: string; step: number; total: number };
+  clue: { id: string; title: string; icon: string; riddle: string };
+  deadline: string;
+  timeLeftSec: number;
 };
+type CurrentClueErr = { ok: false; error: string };
+type CurrentClueResp = CurrentClueOk | CurrentClueErr;
+
+function formatMMSS(seconds: number) {
+  const s = Math.max(0, seconds);
+  const mm = Math.floor(s / 60)
+    .toString()
+    .padStart(2, "0");
+  const ss = (s % 60).toString().padStart(2, "0");
+  return `${mm}:${ss}`;
+}
 
 export default function PlayPage() {
-  const [clue, setClue] = useState<Clue | null>(null);
-  const [digit, setDigit] = useState('');
-  const [timeLeft, setTimeLeft] = useState<number | null>(null);
-  const [lockedUntil, setLockedUntil] = useState<number | null>(null);
-  const [completed, setCompleted] = useState<{ ok: boolean; timeLeft: number } | null>(null);
-  const [cooldownMsg, setCooldownMsg] = useState<string | null>(null);
-  const polling = useRef<NodeJS.Timeout | null>(null);
+  const sp = useSearchParams();
+  const teamId = sp.get("team");
 
-  async function fetchClue() {
-    const r = await fetch('/api/clue/current');
-    if (r.status === 204) {
-      // done, fetch finish state
-      const f = await fetch('/api/finish', { method: 'POST' });
-      if (f.ok) {
-        const data = await f.json();
-        setCompleted({ ok: data.completed, timeLeft: data.timeLeft });
-      }
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const [step, setStep] = useState(0);
+  const [total, setTotal] = useState(0);
+  const [title, setTitle] = useState("");
+  const [icon, setIcon] = useState("");
+  const [riddle, setRiddle] = useState("");
+
+  const [timeLeft, setTimeLeft] = useState<number>(0);
+  const [finished, setFinished] = useState(false);
+
+  const [digit, setDigit] = useState<string>("");
+  const [submitting, setSubmitting] = useState(false);
+  const [feedback, setFeedback] = useState<string | null>(null);
+
+  const deadlineRef = useRef<Date | null>(null);
+
+  async function loadClue() {
+    if (!teamId) {
+      setError("Saknar teamId i URL:en.");
+      setLoading(false);
       return;
     }
-    if (!r.ok) return;
-    const data = await r.json();
-    setClue(data);
-  }
+    setLoading(true);
+    setError(null);
+    setFeedback(null);
 
-  async function fetchStatus() {
-    const r = await fetch('/api/team/status', { cache: 'no-store' });
-    if (!r.ok) return;
-    const data = await r.json();
-    setTimeLeft(data.timeLeft);
-    setLockedUntil(data.lockedUntil ? Date.parse(data.lockedUntil) : null);
-  }
-
-  async function submitDigit(e: React.FormEvent) {
-    e.preventDefault();
-    if (!digit) return;
-    const now = Date.now();
-    if (lockedUntil && now < lockedUntil) {
-      setCooldownMsg('Vänta, cooldown aktiv…');
-      setTimeout(() => setCooldownMsg(null), 1000);
-      return;
-    }
-    const r = await fetch('/api/answer', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ digit: Number(digit[0]) })
+    const res = await fetch(`/api/clue/current?teamId=${encodeURIComponent(teamId)}`, {
+      method: "GET",
+      cache: "no-store",
     });
-    const data = await r.json();
-    setTimeLeft(data.timeLeft);
-    setLockedUntil(data.lockedUntil ? Date.parse(data.lockedUntil) : null);
-
-    if (data.correct) {
-      setDigit('');
-      await fetchClue();
-    } else {
-      // wrong feedback
-      setCooldownMsg('Fel siffra (–30s). Cooldown 3s.');
-      setTimeout(() => setCooldownMsg(null), 1500);
+    const data: CurrentClueResp = await res.json();
+    if (!data.ok) {
+      setError(data.error || "Kunde inte hämta ledtråd.");
+      setLoading(false);
+      return;
     }
 
-    // if step advanced to 4 server will return finish on next clue fetch
-    if (data.step >= 4) {
-      const f = await fetch('/api/finish', { method: 'POST' });
-      if (f.ok) {
-        const fin = await f.json();
-        setCompleted({ ok: fin.completed, timeLeft: fin.timeLeft });
-      }
-    }
+    setStep(data.team.step);
+    setTotal(data.team.total);
+    setTitle(data.clue.title);
+    setIcon(data.clue.icon);
+    setRiddle(data.clue.riddle);
+
+    const deadline = new Date(data.deadline);
+    deadlineRef.current = deadline;
+
+    const now = new Date();
+    const diff = Math.max(0, Math.floor((deadline.getTime() - now.getTime()) / 1000));
+    setTimeLeft(diff);
+    setLoading(false);
+    setDigit("");
   }
 
   useEffect(() => {
-    fetchClue();
-    fetchStatus();
-    polling.current = setInterval(() => {
-      fetchStatus();
-    }, 2000);
+    let cancel = false;
+    (async () => {
+      if (cancel) return;
+      await loadClue();
+    })();
     return () => {
-      if (polling.current) clearInterval(polling.current);
+      cancel = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [teamId]);
+
+  // Tick 1/s
+  useEffect(() => {
+    const t = setInterval(() => {
+      if (!deadlineRef.current) return;
+      const now = new Date();
+      const diff = Math.max(0, Math.floor((deadlineRef.current.getTime() - now.getTime()) / 1000));
+      setTimeLeft(diff);
+    }, 1000);
+    return () => clearInterval(t);
   }, []);
 
-  const mmss = useMemo(() => {
-    if (timeLeft == null) return '--:--';
-    const m = Math.floor(timeLeft / 60);
-    const s = timeLeft % 60;
-    return `${m}:${s.toString().padStart(2, '0')}`;
-  }, [timeLeft]);
+  async function submitDigit(d: number) {
+    if (!teamId || submitting) return;
+    setSubmitting(true);
+    setFeedback(null);
 
-  if (completed) {
-    return (
-      <main className="space-y-6">
-        {completed.ok ? (
-          <>
-            <h1 className="text-2xl font-bold">Klarade utmaningen!</h1>
-            <p>Ni slutförde med <b>{Math.floor(completed.timeLeft / 60)}:{(completed.timeLeft % 60).toString().padStart(2,'0')}</b> kvar.</p>
-            <p className="text-sm opacity-80">Placering visas efter spelomgången.</p>
-          </>
-        ) : (
-          <>
-            <h1 className="text-2xl font-bold">Tiden är ute!</h1>
-            <p>Tack för kämpainsatsen.</p>
-          </>
-        )}
-      </main>
-    );
+    try {
+      const res = await fetch("/api/clue/submit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({ teamId, digit: d }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        if (data?.error === "cooldown") {
+          setFeedback(`Vänta ${data.retryAfterSec ?? 1}s innan nästa försök…`);
+          return;
+        }
+        setFeedback(data?.error || "Fel vid inskick.");
+        return;
+      }
+
+      if (data.result === "correct") {
+        if (data.finished) {
+          setFinished(true);
+          setFeedback("🎉 Klart! Alla ledtrådar lösta.");
+        } else {
+          setFeedback("✅ Rätt! Går vidare…");
+          // Ladda nästa ledtråd
+          await loadClue();
+        }
+      } else if (data.result === "wrong") {
+        setFeedback(`❌ Fel! −${data.penaltyAppliedSec}s och ${data.cooldownSec}s cooldown.`);
+        // Hämta ny deadline/tid från servern via current
+        await loadClue();
+      } else {
+        setFeedback("Okänt svar från servern.");
+      }
+    } finally {
+      setSubmitting(false);
+      setDigit("");
+    }
   }
 
+  const handleKey = (n: number) => {
+    setDigit(String(n));
+    submitDigit(n);
+  };
+
   return (
-    <main className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold">Ledtråd {clue ? clue.index + 1 : 1}/4</h1>
-        <Timer timeLeft={timeLeft ?? 0} />
+    <main className="mx-auto max-w-3xl px-4 py-6 text-white">
+      <div className="mb-4 text-3xl font-bold">
+        Ledtråd {Math.min(step + 1, total)}/{Math.max(total, 1)}
       </div>
 
-      {clue ? (
-        <section className="space-y-3">
-          <div className="text-2xl">{clue.icon} <span className="font-semibold">{clue.title}</span></div>
-          <pre className="whitespace-pre-wrap bg-neutral-900 p-3 rounded-md border border-neutral-800 text-sm leading-6">
-{clue.riddle}
-          </pre>
-          {clue.locationHint ? <p className="text-sm opacity-90"><b>Så vet ni att ni är rätt:</b> {clue.locationHint}</p> : null}
-          {clue.safetyHint ? <p className="text-sm opacity-80"><b>Säkerhet:</b> {clue.safetyHint}</p> : null}
+      <div className="mb-2 text-xl font-semibold">
+        {formatMMSS(timeLeft)} <span className="opacity-70 text-base ml-1">kvar</span>
+      </div>
 
-          <form onSubmit={submitDigit} className="mt-2 flex gap-2">
-            <input
-              inputMode="numeric"
-              pattern="[0-9]*"
-              maxLength={1}
-              className="w-20 text-center rounded-md bg-neutral-900 border border-neutral-700 p-2 text-xl"
-              placeholder="Siffra"
-              value={digit}
-              onChange={(e) => setDigit(e.target.value.replace(/\D/g, '').slice(0,1))}
-            />
-            <button className="rounded-md bg-purple-600 px-4 py-2 font-semibold">Skicka</button>
-          </form>
-          {cooldownMsg ? <div className="text-xs opacity-80">{cooldownMsg}</div> : null}
-        </section>
+      {loading ? (
+        <div className="opacity-80">Laddar ledtråd…</div>
+      ) : error ? (
+        <div className="rounded-md border border-red-500/40 bg-red-900/20 p-3 text-red-200">
+          {error}
+        </div>
+      ) : finished ? (
+        <div className="rounded-xl border border-emerald-500/40 bg-emerald-900/20 p-4">
+          🎉 Klart! Grymt jobbat.
+        </div>
       ) : (
-        <p>Laddar ledtråd…</p>
-      )}
+        <>
+          <div className="space-y-3 mb-6">
+            <div className="flex items-center gap-2">
+              <span className="text-2xl">{icon}</span>
+              <h2 className="text-2xl font-semibold">{title}</h2>
+            </div>
 
-      <div className="text-sm opacity-70">Tid kvar: {mmss}</div>
+            <div className="rounded-xl border border-white/10 bg-white/5 p-4 leading-relaxed">
+              {riddle.split("\n").map((line, i) => (
+                <p key={i} className="mb-2">
+                  {line}
+                </p>
+              ))}
+            </div>
+          </div>
+
+          {/* Snabb inmatning 0–9 */}
+          <div className="grid grid-cols-5 gap-2 max-w-sm">
+            {[1,2,3,4,5,6,7,8,9,0].map((n) => (
+              <button
+                key={n}
+                className="rounded-xl border border-white/10 bg-white/10 py-3 text-lg font-semibold hover:bg-white/20 disabled:opacity-50"
+                disabled={submitting}
+                onClick={() => handleKey(n)}
+              >
+                {n}
+              </button>
+            ))}
+          </div>
+
+          {feedback ? (
+            <div className="mt-4 text-sm opacity-90">{feedback}</div>
+          ) : null}
+        </>
+      )}
     </main>
   );
 }

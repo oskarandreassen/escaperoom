@@ -1,7 +1,4 @@
 {
-  "/api/team/start/route": "app/api/team/start/route.js",
-  "/page": "app/page.js",
-  "/api/clue/current/route": "app/api/clue/current/route.js",
-  "/api/clue/submit/route": "app/api/clue/submit/route.js",
-  "/play/page": "app/play/page.js"
+  "/_not-found/page": "app/_not-found/page.js",
+  "/page": "app/page.js"
 }

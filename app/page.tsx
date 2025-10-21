@@ -56,7 +56,7 @@ export default function Home() {
         <section className="card">
           <h2>Regler & Info</h2>
           <ul className="rules">
-            <li><strong>Tid:</strong> 60 minuter.</li>
+            <li><strong>Tid:</strong> 5 minuter.</li>
             <li><strong>Fel siffra:</strong> –30 sek + 3 sek cooldown.</li>
             <li><strong>Flöde:</strong> En ledtråd åt gången. Rätt siffra låser upp nästa.</li>
             <li><strong>Säkerhet:</strong> Max 4 i bastun. Rör inte aggregatet. Rör inget utan ikon.</li>

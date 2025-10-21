@@ -23,7 +23,7 @@ Next.js (App Router) + TypeScript + Neon (Postgres) + Vercel KV.
 - Spelare: `/` → regler + start (skapar team, startar timer).
 - Spel: `/play` → ledtråd + siffra → validering, –30s vid fel, 3s cooldown.
 - Slut: visar om klart + tid kvar, ej ranking.
-- Admin: `/admin/login` → `/admin` för översikt.
+- Admin: `/api/admin/login` → `/api/admin` för översikt.
 
 ## Data
 - `teams`, `submissions`, `content_clues` i Postgres.

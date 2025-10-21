@@ -1,4 +1,4 @@
-// app/admin/login/page.tsx
+// app/api/admin/login/page.tsx
 'use client';
 
 import { useState } from 'react';
@@ -10,11 +10,11 @@ export default function AdminLoginPage() {
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
-    const res = await fetch('/admin', {
+    const res = await fetch('/api/admin', {
       method: 'POST',
       body: JSON.stringify({ password: pwd })
     });
-    if (res.ok) window.location.href = '/admin';
+    if (res.ok) window.location.href = '/api/admin';
     else alert('Fel lösenord');
     setLoading(false);
   }

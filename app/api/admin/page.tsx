@@ -1,4 +1,4 @@
-// app/admin/page.tsx
+// app/api/admin/page.tsx
 import { db } from "@/lib/db";
 import { contentClues, teams } from "@/lib/schema";
 import { eq } from "drizzle-orm";

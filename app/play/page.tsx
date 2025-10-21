@@ -30,6 +30,11 @@ function mmss(s: number) {
   const ss = (v % 60).toString().padStart(2, "0");
   return `${m}:${ss}`;
 }
+function humanTime(total: number) {
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return `${m}m ${s.toString().padStart(2, "0")}s`;
+}
 
 export default function PlayPage() {
   const sp = useSearchParams();
@@ -48,11 +53,14 @@ export default function PlayPage() {
   const [type, setType] = useState<"digit" | "code">("digit");
 
   const [timeLeft, setTimeLeft] = useState(0);
+  const [totalTime, setTotalTime] = useState<number | null>(null);
+
   const [answer, setAnswer] = useState("");
   const [feedback, setFeedback] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   const deadlineRef = useRef<Date | null>(null);
+  const tickerRef = useRef<number | null>(null);
 
   async function load() {
     if (!teamId) {
@@ -80,10 +88,11 @@ export default function PlayPage() {
 
     if (data.finished) {
       setFinished(true);
+      setTotalTime(data.totalTimeSec);
+      // stoppa timer i UI
+      deadlineRef.current = null;
+      setTimeLeft(0);
       setLoading(false);
-      // Visa sluttid som feedback
-      const t = data.totalTimeSec;
-      setFeedback(`Klar tid: ${Math.floor(t / 60)}m ${(t % 60).toString().padStart(2, "0")}s`);
       return;
     }
 
@@ -107,13 +116,18 @@ export default function PlayPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [teamId]);
 
+  // Tick 1/s när det finns deadline
   useEffect(() => {
-    const id = setInterval(() => {
+    tickerRef.current = window.setInterval(() => {
       if (!deadlineRef.current) return;
       const now = new Date();
       setTimeLeft(Math.max(0, Math.floor((deadlineRef.current.getTime() - now.getTime()) / 1000)));
     }, 1000);
-    return () => clearInterval(id);
+    return () => {
+      if (tickerRef.current) {
+        clearInterval(tickerRef.current);
+      }
+    };
   }, []);
 
   async function submit() {
@@ -147,7 +161,7 @@ export default function PlayPage() {
         if (data.finished) {
           setFinished(true);
           setFeedback("🎉 Klart! Grymt jobbat.");
-          await load(); // hämta sluttid
+          await load(); // detta hämtar total tid och nollställer timer
         } else {
           setFeedback("✅ Rätt! Går vidare…");
           await load();
@@ -157,6 +171,7 @@ export default function PlayPage() {
         await load();
       } else if (data.result === "finished") {
         setFinished(true);
+        await load();
       }
     } finally {
       setSubmitting(false);
@@ -164,97 +179,132 @@ export default function PlayPage() {
     }
   }
 
-  // UI-knappar för 0–9
+  // UI-knappar 0–9
   function tap(n: number) {
-    // vid "digit" – begränsa till max 1 tecken
+    if (finished) return;
     if (type === "digit") {
       setAnswer(String(n));
     } else {
-      // "code" – lägg på
-      setAnswer((prev) => (prev + String(n)).slice(0, 8)); // begränsa rimligt
+      setAnswer((prev) => (prev + String(n)).slice(0, 8));
     }
   }
 
+  // ===== UI =====
   return (
-    <main className="mx-auto max-w-3xl px-4 py-8 text-white">
-      <div className="mb-6 flex items-baseline justify-between">
-        <div className="text-3xl font-bold">Ledtråd {Math.min(step + 1, total)}/{Math.max(total, 1)}</div>
-        <div className="text-2xl font-semibold tabular-nums">{mmss(timeLeft)}</div>
-      </div>
-
-      {loading ? (
-        <div className="opacity-80">Laddar…</div>
-      ) : finished ? (
-        <div className="rounded-2xl border border-emerald-400/30 bg-emerald-900/20 p-5 shadow-lg">
-          <div className="text-2xl font-semibold mb-1">🎉 Klart! Grymt jobbat.</div>
-          {feedback ? <div className="opacity-90">{feedback}</div> : null}
-        </div>
-      ) : error ? (
-        <div className="rounded-2xl border border-red-400/30 bg-red-900/20 p-5">{error}</div>
-      ) : (
-        <div className="grid md:grid-cols-2 gap-6">
-          {/* Riddle card */}
-          <div className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg">
-            <div className="mb-3 flex items-center gap-2">
-              <span className="text-2xl">{icon}</span>
-              <h2 className="text-xl font-semibold">{title}</h2>
-              <span className="ml-auto rounded-full border border-white/10 px-2 py-0.5 text-xs opacity-80">
-                {type === "digit" ? "1 siffra" : "Kod"}
-              </span>
-            </div>
-            <div className="leading-relaxed opacity-95">
-              {riddle.split("\n").map((line, i) => (
-                <p key={i} className="mb-2">
-                  {line}
-                </p>
-              ))}
-            </div>
+    <main className="min-h-[100dvh] bg-gradient-to-b from-black via-[#0b0c11] to-[#0b0c11] text-white">
+      {/* Page container */}
+      <div className="mx-auto w-full max-w-6xl px-4 py-8">
+        {/* Header row */}
+        <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-baseline gap-3">
+            <span className="rounded-xl bg-orange-500/10 px-3 py-1 text-sm font-semibold text-orange-300">
+              Halloween Escaperoom
+            </span>
+            <h1 className="text-2xl font-bold tracking-tight">Vågar ni gå in?</h1>
           </div>
 
-          {/* Answer card */}
-          <div className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg">
-            <div className="mb-3 text-sm opacity-80">Skriv in svaret</div>
-            <input
-              inputMode="numeric"
-              pattern="[0-9]*"
-              value={answer}
-              onChange={(e) => {
-                const v = e.target.value.replace(/\D/g, "");
-                setAnswer(type === "digit" ? v.slice(0, 1) : v.slice(0, 8));
-              }}
-              className="mb-4 w-full rounded-xl border border-white/10 bg-black/30 p-3 text-lg tabular-nums outline-none focus:ring-2 focus:ring-white/20"
-              placeholder={type === "digit" ? "En siffra (0–9)" : "Kod (endast siffror)"}
-            />
+          {/* Visa timer endast när INTE finished */}
+          {!finished && (
+            <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-2 text-2xl font-bold tabular-nums shadow-sm">
+              {mmss(timeLeft)}
+            </div>
+          )}
+        </div>
 
-            <div className="grid grid-cols-5 gap-2 mb-4">
-              {[1,2,3,4,5,6,7,8,9,0].map((n) => (
+        {/* Progress */}
+        <div className="mb-6 text-sm opacity-80">
+          Ledtråd{" "}
+          <span className="font-semibold">
+            {Math.min(step + 1, Math.max(total, 1))}/{Math.max(total, 1)}
+          </span>
+        </div>
+
+        {/* Content grid */}
+        {loading ? (
+          <div className="rounded-2xl border border-white/10 bg-white/5 p-6">Laddar…</div>
+        ) : error ? (
+          <div className="rounded-2xl border border-red-500/30 bg-red-900/20 p-6">{error}</div>
+        ) : finished ? (
+          <div className="rounded-2xl border border-emerald-500/30 bg-emerald-900/20 p-6 shadow-lg">
+            <div className="mb-2 text-2xl font-semibold">🎉 Klart! Grymt jobbat.</div>
+            <div className="text-lg opacity-90">
+              Klar tid: <span className="font-semibold">{humanTime(totalTime ?? 0)}</span>
+            </div>
+          </div>
+        ) : (
+          <div className="grid gap-6 md:grid-cols-[1.3fr_1fr]">
+            {/* Riddle card */}
+            <section className="rounded-2xl border border-white/10 bg-gradient-to-b from-white/5 to-white/0 p-6 shadow-xl">
+              <div className="mb-4 flex items-center gap-2">
+                <span className="text-2xl">{icon}</span>
+                <h2 className="text-xl font-semibold">{title}</h2>
+                <span className="ml-auto rounded-full border border-white/10 px-2 py-0.5 text-xs opacity-70">
+                  {type === "digit" ? "1 siffra" : "Kod"}
+                </span>
+              </div>
+
+              <div className="leading-relaxed opacity-95">
+                {riddle.split("\n").map((line, i) => (
+                  <p key={i} className="mb-2">
+                    {line}
+                  </p>
+                ))}
+              </div>
+            </section>
+
+            {/* Answer card */}
+            <section className="rounded-2xl border border-white/10 bg-white/5 p-6 shadow-xl">
+              <div className="mb-3 text-sm opacity-80">Skriv in svaret</div>
+
+              <input
+                inputMode="numeric"
+                pattern="[0-9]*"
+                value={answer}
+                onChange={(e) => {
+                  const v = e.target.value.replace(/\D/g, "");
+                  setAnswer(type === "digit" ? v.slice(0, 1) : v.slice(0, 8));
+                }}
+                className="mb-4 w-full rounded-xl border border-white/10 bg-black/30 p-4 text-2xl tabular-nums outline-none focus:ring-2 focus:ring-white/20"
+                placeholder={type === "digit" ? "En siffra (0–9)" : "Kod (endast siffror)"}
+              />
+
+              <div className="grid grid-cols-5 gap-2 mb-4">
+                {[1,2,3,4,5,6,7,8,9,0].map((n) => (
+                  <button
+                    key={n}
+                    className="rounded-xl border border-white/10 bg-white/10 py-3 text-lg font-semibold hover:bg-white/20 active:scale-[0.98] transition"
+                    onClick={() => tap(n)}
+                    type="button"
+                  >
+                    {n}
+                  </button>
+                ))}
                 <button
-                  key={n}
-                  className="rounded-xl border border-white/10 bg-white/10 py-3 text-lg font-semibold hover:bg-white/20"
-                  onClick={() => tap(n)}
+                  className="col-span-2 rounded-xl border border-white/10 bg-white/10 py-3 text-lg font-semibold hover:bg-white/20"
+                  onClick={() => setAnswer((p) => p.slice(0, -1))}
+                  type="button"
                 >
-                  {n}
+                  ⌫ Radera
                 </button>
-              ))}
-              <button
-                className="col-span-2 rounded-xl border border-white/10 bg-white/10 py-3 text-lg font-semibold hover:bg-white/20"
-                onClick={() => setAnswer((p) => p.slice(0, -1))}
-              >
-                ⌫ Radera
-              </button>
-              <button
-                className="col-span-3 rounded-xl border border-emerald-400/40 bg-emerald-600/30 py-3 text-lg font-semibold hover:bg-emerald-600/40 disabled:opacity-60"
-                onClick={submit}
-                disabled={submitting || answer.length === 0}
-              >
-                ✅ Skicka
-              </button>
-            </div>
+                <button
+                  className="col-span-3 rounded-xl border border-emerald-400/40 bg-emerald-600/30 py-3 text-lg font-semibold hover:bg-emerald-600/40 disabled:opacity-60"
+                  onClick={submit}
+                  disabled={submitting || answer.length === 0}
+                  type="button"
+                >
+                  ✅ Skicka
+                </button>
+              </div>
 
-            {feedback ? <div className="text-sm opacity-90">{feedback}</div> : null}
+              {feedback ? (
+                <div className="rounded-lg border border-white/10 bg-black/20 p-3 text-sm opacity-90">
+                  {feedback}
+                </div>
+              ) : null}
+            </section>
           </div>
-        </div>
-      )}
+        )}
+      </div>
     </main>
   );
 }

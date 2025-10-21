@@ -1,8 +1,12 @@
 // app/play/page.tsx
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
+
+// Viktigt: gör sidan dynamisk och cache-fri i prod-build
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 type CurrentOk =
   | {
@@ -37,6 +41,15 @@ function humanTime(total: number) {
 }
 
 export default function PlayPage() {
+  // Lägg ALLT som använder useSearchParams inuti <Suspense>
+  return (
+    <Suspense fallback={<div className="min-h-[60vh] grid place-items-center text-white/80">Laddar…</div>}>
+      <PlayClient />
+    </Suspense>
+  );
+}
+
+function PlayClient() {
   const sp = useSearchParams();
   const teamId = sp.get("team");
 
@@ -86,23 +99,24 @@ export default function PlayPage() {
     setStep(data.team.step);
     setTotal(data.team.total);
 
-    if (data.finished) {
+    if ("finished" in data && data.finished) {
       setFinished(true);
       setTotalTime(data.totalTimeSec);
-      // stoppa timer i UI
+      // stoppa UI-timer
       deadlineRef.current = null;
       setTimeLeft(0);
       setLoading(false);
       return;
     }
 
+    const d = data as Extract<CurrentResp, { ok: true; finished: false }>;
     setFinished(false);
-    setTitle(data.clue.title);
-    setIcon(data.clue.icon);
-    setRiddle(data.clue.riddle);
-    setType(data.clue.type);
+    setTitle(d.clue.title);
+    setIcon(d.clue.icon);
+    setRiddle(d.clue.riddle);
+    setType(d.clue.type);
 
-    const dl = new Date(data.deadline);
+    const dl = new Date(d.deadline);
     deadlineRef.current = dl;
     const now = new Date();
     setTimeLeft(Math.max(0, Math.floor((dl.getTime() - now.getTime()) / 1000)));
@@ -116,7 +130,6 @@ export default function PlayPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [teamId]);
 
-  // Tick 1/s när det finns deadline
   useEffect(() => {
     tickerRef.current = window.setInterval(() => {
       if (!deadlineRef.current) return;
@@ -124,9 +137,7 @@ export default function PlayPage() {
       setTimeLeft(Math.max(0, Math.floor((deadlineRef.current.getTime() - now.getTime()) / 1000)));
     }, 1000);
     return () => {
-      if (tickerRef.current) {
-        clearInterval(tickerRef.current);
-      }
+      if (tickerRef.current) clearInterval(tickerRef.current);
     };
   }, []);
 
@@ -161,7 +172,7 @@ export default function PlayPage() {
         if (data.finished) {
           setFinished(true);
           setFeedback("🎉 Klart! Grymt jobbat.");
-          await load(); // detta hämtar total tid och nollställer timer
+          await load(); // hämtar total tid och nollställer timer
         } else {
           setFeedback("✅ Rätt! Går vidare…");
           await load();
@@ -179,7 +190,6 @@ export default function PlayPage() {
     }
   }
 
-  // UI-knappar 0–9
   function tap(n: number) {
     if (finished) return;
     if (type === "digit") {
@@ -189,12 +199,9 @@ export default function PlayPage() {
     }
   }
 
-  // ===== UI =====
   return (
     <main className="min-h-[100dvh] bg-gradient-to-b from-black via-[#0b0c11] to-[#0b0c11] text-white">
-      {/* Page container */}
       <div className="mx-auto w-full max-w-6xl px-4 py-8">
-        {/* Header row */}
         <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-baseline gap-3">
             <span className="rounded-xl bg-orange-500/10 px-3 py-1 text-sm font-semibold text-orange-300">
@@ -203,7 +210,6 @@ export default function PlayPage() {
             <h1 className="text-2xl font-bold tracking-tight">Vågar ni gå in?</h1>
           </div>
 
-          {/* Visa timer endast när INTE finished */}
           {!finished && (
             <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-2 text-2xl font-bold tabular-nums shadow-sm">
               {mmss(timeLeft)}
@@ -211,7 +217,6 @@ export default function PlayPage() {
           )}
         </div>
 
-        {/* Progress */}
         <div className="mb-6 text-sm opacity-80">
           Ledtråd{" "}
           <span className="font-semibold">
@@ -219,7 +224,6 @@ export default function PlayPage() {
           </span>
         </div>
 
-        {/* Content grid */}
         {loading ? (
           <div className="rounded-2xl border border-white/10 bg-white/5 p-6">Laddar…</div>
         ) : error ? (
@@ -233,7 +237,6 @@ export default function PlayPage() {
           </div>
         ) : (
           <div className="grid gap-6 md:grid-cols-[1.3fr_1fr]">
-            {/* Riddle card */}
             <section className="rounded-2xl border border-white/10 bg-gradient-to-b from-white/5 to-white/0 p-6 shadow-xl">
               <div className="mb-4 flex items-center gap-2">
                 <span className="text-2xl">{icon}</span>
@@ -252,7 +255,6 @@ export default function PlayPage() {
               </div>
             </section>
 
-            {/* Answer card */}
             <section className="rounded-2xl border border-white/10 bg-white/5 p-6 shadow-xl">
               <div className="mb-3 text-sm opacity-80">Skriv in svaret</div>
 

@@ -130,3 +130,65 @@ ul.rules li{ margin: 8px 0; }
 }
 
 .error{ border-left-color: var(--error); background: rgba(255,70,100,.08); color: #ffd1da; }
+
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ---- Reusable UI atoms (matchar startsidan) ---- */
+@layer components {
+  /* Glassy card */
+  .glass-card {
+    @apply rounded-3xl border border-white/10 bg-white/5 shadow-[0_10px_30px_rgba(0,0,0,.45)];
+  }
+
+  /* Glow-card variant (svag inre glöd) */
+  .glow-card {
+    @apply glass-card ring-1 ring-white/5;
+  }
+
+  /* Header-badge (Halloween Escaperoom) */
+  .badge {
+    @apply rounded-lg bg-orange-500/15 px-2.5 py-1 text-xs font-semibold text-orange-300;
+  }
+
+  /* Textpill för små status */
+  .pill {
+    @apply rounded-full border border-white/10 px-2.5 py-0.5 text-xs opacity-80;
+  }
+
+  /* Bas-knapp */
+  .btn {
+    @apply rounded-2xl border border-white/10 bg-white/10 px-4 py-3 font-semibold transition;
+  }
+  .btn:hover { @apply bg-white/20; }
+  .btn:disabled { @apply opacity-50 cursor-not-allowed; }
+
+  /* Primär-knapp (grön) */
+  .btn-primary {
+    @apply rounded-2xl border border-emerald-400/40 bg-emerald-600/40 px-4 py-3 font-semibold transition;
+  }
+  .btn-primary:hover { @apply bg-emerald-600/50; }
+
+  /* Orangepuff (som Starta-knappen) */
+  .btn-pumpkin {
+    @apply rounded-2xl bg-[#ffa118] text-black font-bold px-5 py-3 shadow-[0_8px_25px_rgba(255,161,24,.35)];
+  }
+  .btn-pumpkin:hover { @apply brightness-110; }
+
+  /* Keypad key */
+  .key {
+    @apply rounded-2xl py-3 text-xl font-semibold transition active:scale-[0.98] border border-white/10 bg-white/10;
+  }
+  .key:hover { @apply bg-white/20; }
+  .key-primary {
+    @apply rounded-2xl py-3 text-xl font-semibold transition active:scale-[0.98] border border-emerald-400/40 bg-emerald-600/40;
+  }
+  .key-primary:hover { @apply bg-emerald-600/50; }
+
+  /* Form input */
+  .input {
+    @apply w-full rounded-2xl border border-white/10 bg-black/30 p-4 text-2xl tabular-nums outline-none focus:ring-2 focus:ring-white/20;
+  }
+}

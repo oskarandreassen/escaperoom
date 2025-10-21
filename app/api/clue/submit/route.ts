@@ -14,19 +14,18 @@ export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => ({}));
     const teamId: unknown = body?.teamId;
-    const answer: unknown = body?.answer; // OBS! nu "answer" som string (kan vara "3" eller "7214")
+    const answer: unknown = body?.answer; // numerisk sträng, t.ex. "3" eller "7214"
 
     if (typeof teamId !== "string" || !teamId) {
       return NextResponse.json({ ok: false, error: "Missing teamId" }, { status: 400 });
     }
-    if (typeof answer !== "string" || !/^\d+$/.test(answer)) {
-      return NextResponse.json({ ok: false, error: "Answer must be numeric string" }, { status: 400 });
+    if (typeof answer !== "string" || answer.length === 0 || !/^\d+$/.test(answer)) {
+      return NextResponse.json({ ok: false, error: "Answer must be a non-empty numeric string" }, { status: 400 });
     }
 
     const [team] = await db.select().from(teams).where(eq(teams.id, teamId));
     if (!team) return NextResponse.json({ ok: false, error: "Team not found" }, { status: 404 });
 
-    // Om redan klart -> svara direkt
     const activeClues = CLUES.filter((c) => c.active !== false);
     const total = activeClues.length;
     const step = Math.min(Math.max(typeof team.step === "number" ? team.step : 0, 0), Math.max(total - 1, 0));
@@ -49,7 +48,7 @@ export async function POST(req: Request) {
       }
     }
 
-    // Deadline (om saknas, skapa utifrån clue.duration)
+    // Deadline (per-ledtråd)
     const clueSeconds = typeof clue.durationSec === "number" ? clue.durationSec : DEFAULT_CLUE_SECONDS;
     let deadline = team.lockedUntil ? new Date(team.lockedUntil) : null;
     if (!deadline || deadline <= now) {
@@ -58,22 +57,22 @@ export async function POST(req: Request) {
     }
     const timeLeftAtSubmit = Math.max(0, Math.floor((deadline.getTime() - now.getTime()) / 1000));
 
-    // Spara submission (notera: vi fyller digit med parseInt(answ[0]) för att ej bryta modellen)
+    // Spara submission (legacy-kolumn digit fylls med första siffran)
     await db.insert(submissions).values({
       teamId: team.id,
-      digit: parseInt(answer[0], 10), // legacy-kolumn, vi använder första siffran
-      correct: answer === clue.expected,
+      digit: parseInt((answer as string).charAt(0), 10), // <-- fix: .charAt(0) är alltid string
+      correct: (answer as string) === clue.expected,
       submittedAt: now,
       timeLeftAtSubmit,
     });
 
-    if (answer === clue.expected) {
+    if ((answer as string) === clue.expected) {
       const isLast = step >= total - 1;
       await db
         .update(teams)
         .set({
           step: isLast ? step : step + 1,
-          lockedUntil: null, // nästa current sätter ny deadline om inte klart
+          lockedUntil: null,
           completedAt: isLast ? now : team.completedAt,
         })
         .where(eq(teams.id, teamId));
@@ -86,7 +85,7 @@ export async function POST(req: Request) {
       });
     }
 
-    // Fel svar -> -30s + cooldown
+    // Fel svar → -30s + cooldown
     const newDeadlineMs = Math.max(now.getTime(), deadline.getTime() - WRONG_PENALTY_SEC * 1000);
     const newDeadline = new Date(newDeadlineMs);
 

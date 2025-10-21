@@ -1,4 +1,6 @@
 // app/api/admin/route.ts
+export const runtime = "nodejs";
+
 import { NextResponse } from "next/server";
 
 export async function GET() {
@@ -6,6 +8,6 @@ export async function GET() {
 }
 
 export async function POST() {
-  // Lägg ev. admin-initialisering här (tex seedning)
+  // ev. framtida admin-init/seed
   return NextResponse.json({ ok: true });
 }

@@ -5,6 +5,7 @@ import { useState } from "react";
 
 export default function Home() {
   const [teamName, setTeamName] = useState("");
+  const [participants, setParticipants] = useState(""); // NEW
   const [accepted, setAccepted] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -19,12 +20,16 @@ export default function Home() {
       setErr("Ange ett lagnamn.");
       return;
     }
+
     setBusy(true);
     try {
       const res = await fetch("/api/team/start", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ teamName }),
+        body: JSON.stringify({
+          teamName: teamName.trim(),
+          participants: participants.trim() || null, // NEW
+        }),
       });
 
       const data = await res.json().catch(() => ({}));
@@ -32,7 +37,6 @@ export default function Home() {
         throw new Error(data?.error || "Något gick fel. Försök igen.");
       }
 
-      // Success – navigate to the game (adjust path if yours differs)
       window.location.href = `/play?team=${encodeURIComponent(data.teamId)}`;
     } catch (e: any) {
       setErr(e.message || "Något gick fel. Försök igen.");
@@ -52,7 +56,7 @@ export default function Home() {
         </div>
       </div>
 
-      <div className="grid">
+      <div className="two-col">
         <section className="card">
           <h2>Regler & Info</h2>
           <ul className="rules">
@@ -80,6 +84,20 @@ export default function Home() {
               value={teamName}
               onChange={(e) => setTeamName(e.target.value)}
               maxLength={64}
+              autoComplete="off"
+            />
+          </div>
+
+          {/* NEW: Deltagare */}
+          <div className="field">
+            <label htmlFor="participants">Deltagare</label>
+            <input
+              id="participants"
+              className="input"
+              placeholder="Ex. Anna, Bo, Carla"
+              value={participants}
+              onChange={(e) => setParticipants(e.target.value)}
+              maxLength={256}
               autoComplete="off"
             />
           </div>

@@ -15,6 +15,7 @@ import {
 export const teams = pgTable("teams", {
   id: uuid("id").defaultRandom().primaryKey(),
   teamName: text("team_name").notNull(),
+  participants: text("participants"), // <— NY: komma-separerade namn eller fri text
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   startedAt: timestamp("started_at", { withTimezone: true }),
   step: smallint("step").notNull().default(0),
@@ -26,6 +27,7 @@ export const teams = pgTable("teams", {
   finalCode: char("final_code", { length: 6 }),
   fraudSuspected: boolean("fraud_suspected").notNull().default(false),
 });
+
 
 export const submissions = pgTable(
   "submissions",
@@ -69,3 +71,6 @@ export const contentClues = pgTable(
     ),
   })
 );
+
+
+

@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 
+/* ---------------- Types ---------------- */
 type CurrentOk =
   | {
       ok: true;
@@ -21,6 +22,7 @@ type CurrentOk =
 
 type CurrentResp = CurrentOk | { ok: false; error: string };
 
+/* ---------------- Utils ---------------- */
 function mmss(s: number) {
   const v = Math.max(0, s);
   const m = Math.floor(v / 60).toString().padStart(2, "0");
@@ -33,6 +35,7 @@ function humanTime(total: number) {
   return `${m}m ${s.toString().padStart(2, "0")}s`;
 }
 
+/* ---------------- Page ---------------- */
 export default function PlayClient() {
   const sp = useSearchParams();
   const teamId = sp.get("team");
@@ -40,12 +43,13 @@ export default function PlayClient() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [finished, setFinished] = useState(false);
+  const [lost, setLost] = useState(false); // -> tidsutgång
 
   const [step, setStep] = useState(0);
   const [total, setTotal] = useState(0);
 
+  // (title tas bort från UI, men vi låter variabeln ligga kvar ifall du vill använda på admin)
   const [title, setTitle] = useState("");
-  const [icon, setIcon] = useState("");
   const [riddle, setRiddle] = useState("");
   const [type, setType] = useState<"digit" | "code">("digit");
 
@@ -84,7 +88,9 @@ export default function PlayClient() {
     setTotal(data.team.total);
 
     if ("finished" in data && data.finished) {
+      // Spelet klart
       setFinished(true);
+      setLost(false);
       setTotalTime(data.totalTimeSec);
       deadlineRef.current = null;
       setTimeLeft(0);
@@ -92,17 +98,26 @@ export default function PlayClient() {
       return;
     }
 
+    // Pågående ledtråd
     const d = data as Extract<CurrentResp, { ok: true; finished: false }>;
     setFinished(false);
+    setLost(false);
     setTitle(d.clue.title);
-    setIcon(d.clue.icon);
     setRiddle(d.clue.riddle);
     setType(d.clue.type);
 
-    const dl = new Date(d.deadline);
-    deadlineRef.current = dl;
+    // Se till att deadline ALDRIG kan "bli längre" (fix för reset till 5:00)
+    const incoming = new Date(d.deadline);
+    if (deadlineRef.current && incoming > deadlineRef.current) {
+      // behåll den kortare (tidigare) deadlinen
+      // (om backend skickar felaktigt för lång deadline)
+    } else {
+      deadlineRef.current = incoming;
+    }
+
     const now = new Date();
-    setTimeLeft(Math.max(0, Math.floor((dl.getTime() - now.getTime()) / 1000)));
+    const tl = Math.max(0, Math.floor(((deadlineRef.current ?? incoming).getTime() - now.getTime()) / 1000));
+    setTimeLeft(tl);
 
     setAnswer("");
     setLoading(false);
@@ -114,15 +129,33 @@ export default function PlayClient() {
   }, [teamId]);
 
   useEffect(() => {
-    tickerRef.current = window.setInterval(() => {
+    // 1 Hz ticker
+    tickerRef.current = window.setInterval(async () => {
       if (!deadlineRef.current) return;
       const now = new Date();
-      setTimeLeft(Math.max(0, Math.floor((deadlineRef.current.getTime() - now.getTime()) / 1000)));
+      const tl = Math.max(0, Math.floor((deadlineRef.current.getTime() - now.getTime()) / 1000));
+      setTimeLeft(tl);
+
+      // TIMEOUT => auto-förlust
+      if (tl <= 0 && !finished) {
+        setFinished(true);
+        setLost(true);
+        setFeedback(null);
+        // Best effort: tala om för backend (ignorera ev 404)
+        try {
+          await fetch("/api/team/timeout", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ teamId }),
+          });
+        } catch {}
+      }
     }, 1000);
+
     return () => {
       if (tickerRef.current) clearInterval(tickerRef.current);
     };
-  }, []);
+  }, [finished, teamId]);
 
   async function submit() {
     if (!teamId || submitting || finished) return;
@@ -154,17 +187,19 @@ export default function PlayClient() {
       if (data.result === "correct") {
         if (data.finished) {
           setFinished(true);
+          setLost(false);
           setFeedback("🎉 Klart! Grymt jobbat.");
           await load();
         } else {
           setFeedback("✅ Rätt! Går vidare…");
-          await load();
+          await load(); // deadline hålls via "min"-logiken i load()
         }
       } else if (data.result === "wrong") {
         setFeedback(`❌ Fel! −${data.penaltyAppliedSec}s och ${data.cooldownSec}s cooldown.`);
-        await load();
+        await load(); // backend kan flytta deadline bakåt; vi plockar upp det
       } else if (data.result === "finished") {
         setFinished(true);
+        setLost(false);
         await load();
       }
     } finally {
@@ -179,14 +214,14 @@ export default function PlayClient() {
     else setAnswer((prev) => (prev + String(n)).slice(0, 8));
   }
 
-  /* ================== UI ================== */
+  /* ---------------- UI ---------------- */
   return (
-    <div className="page-bg min-h-[100dvh] text-white">
-      {/* top bar like landing */}
+    <div className="page-bg min-h-dvh text-white">
+      {/* header som på startsidan */}
       <header className="sticky top-0 z-20 border-b border-white/10 bg-black/40 backdrop-blur">
-        <div className="mx-auto max-w-6xl px-4 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <span className="badge-pumpkin">Halloween Escaperoom</span>
+        <div className="container flex items-center justify-between">
+          <div className="hero">
+            <span className="badge">Halloween Escaperoom</span>
             <h1 className="text-xl sm:text-2xl font-bold tracking-tight">Vågar ni gå in?</h1>
           </div>
           {!finished && (
@@ -197,46 +232,64 @@ export default function PlayClient() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-6xl px-4 pb-[7.5rem] sm:pb-10 pt-6">
-        <div className="mb-5 text-sm opacity-80">
-          Ledtråd{" "}
-          <span className="font-semibold">
-            {Math.min(step + 1, Math.max(total, 1))}/{Math.max(total, 1)}
-          </span>
-        </div>
+      <main className="container">
+        {/* Toppen "Ledtråd x/y" tas bort — flyttas in i första kortet */}
 
         {loading ? (
-          <div className="card p-6">Laddar…</div>
+          <div className="card">Laddar…</div>
         ) : error ? (
-          <div className="card border-red-500/30 bg-red-900/25 p-6">{error}</div>
+          <div className="card" style={{ borderColor: "rgba(255,70,100,.4)", background: "rgba(255,70,100,.08)" }}>
+            {error}
+          </div>
         ) : finished ? (
-          <section className="mx-auto max-w-2xl card border-emerald-400/30 bg-gradient-to-b from-emerald-900/25 to-emerald-900/10 p-8 text-center">
-            <div className="text-5xl mb-3">🎉</div>
-            <h2 className="text-2xl sm:text-3xl font-semibold mb-2">Klart! Grymt jobbat.</h2>
-            <p className="text-base opacity-90 mb-6">
-              Klar tid:{" "}
-              <span className="text-3xl font-bold tabular-nums align-middle">
-                {humanTime(totalTime ?? 0)}
-              </span>
-            </p>
+          <section
+            className="mx-auto max-w-2xl card"
+            style={{
+              borderColor: lost ? "rgba(255,70,100,.45)" : "rgba(16,185,129,.35)",
+              background: lost ? "rgba(255,70,100,.10)" : "rgba(5,150,105,.20)",
+            }}
+          >
+            <div className="text-5xl mb-3">{lost ? "⏱️" : "🎉"}</div>
+            <h2 className="text-2xl sm:text-3xl font-semibold mb-2">
+              {lost ? "Tiden är slut!" : "Klart! Grymt jobbat."}
+            </h2>
+
+            {!lost ? (
+              <p className="text-base opacity-90 mb-6">
+                Klar tid:{" "}
+                <span className="text-3xl font-bold tabular-nums align-middle">
+                  {humanTime(totalTime ?? 0)}
+                </span>
+              </p>
+            ) : (
+              <p className="text-base opacity-90 mb-6">
+                Ni hann inte klart inom 5 minuter. Försök igen!
+              </p>
+            )}
+
             <div className="flex flex-col sm:flex-row gap-3 justify-center">
-              <a href="/" className="btn-ghost text-center">↩︎ Till startsidan</a>
+              {/* 4) Ta bort "Till startsidan" enligt önskemål */}
               <button
-                onClick={() => navigator.clipboard?.writeText(`Klar tid: ${humanTime(totalTime ?? 0)}`)}
+                onClick={() =>
+                  navigator.clipboard?.writeText(
+                    lost ? "Tiden tog slut." : `Klar tid: ${humanTime(totalTime ?? 0)}`
+                  )
+                }
                 className="btn-primary"
               >
-                📋 Kopiera klar tid
+                📋 {lost ? "Kopiera meddelande" : "Kopiera klar tid"}
               </button>
             </div>
           </section>
         ) : (
-          <div className="grid gap-6 md:grid-cols-[1.3fr_1fr]">
-            {/* riddle */}
-            <section className="card p-6 sm:p-8">
-              <div className="mb-4 flex items-center gap-3">
-                <span className="text-2xl">{icon}</span>
-                <h2 className="text-xl sm:text-2xl font-semibold">{title}</h2>
+          // === Två cards (gåta + keypad) ===
+          <div className="two-col">
+            {/* Card 1: Gåtan (utan title, med "Ledtråd x/y" i hörnet) */}
+            <section className="card">
+              <div className="mb-3 flex items-center gap-3">
+                {/* Titel borttagen helt */}
                 <span className="ml-auto rounded-full border border-white/10 px-2.5 py-0.5 text-xs opacity-75">
+                  Ledtråd {Math.min(step + 1, Math.max(total, 1))}/{Math.max(total, 1)} ·{" "}
                   {type === "digit" ? "1 siffra" : "Kod"}
                 </span>
               </div>
@@ -245,10 +298,15 @@ export default function PlayClient() {
                   <p key={i}>{line}</p>
                 ))}
               </article>
+              {feedback ? (
+                <div className="mt-4 rounded-xl border border-white/10 bg-black/20 p-3 text-sm opacity-90">
+                  {feedback}
+                </div>
+              ) : null}
             </section>
 
-            {/* answer */}
-            <section className="card p-6 sm:p-8">
+            {/* Card 2: Svar + keypad */}
+            <section className="card">
               <label htmlFor="answer" className="mb-2 block text-sm opacity-80">
                 Skriv in svaret
               </label>
@@ -261,64 +319,33 @@ export default function PlayClient() {
                   const v = e.target.value.replace(/\D/g, "");
                   setAnswer(type === "digit" ? v.slice(0, 1) : v.slice(0, 8));
                 }}
-                className="mb-5 w-full rounded-2xl border border-white/10 bg-black/30 p-4 text-2xl tabular-nums outline-none focus:ring-2 focus:ring-white/20"
+                className="input mb-5 w-full text-2xl tabular-nums"
                 placeholder={type === "digit" ? "En siffra (0–9)" : "Kod (endast siffror)"}
                 aria-label={type === "digit" ? "En siffra 0–9" : "Kod, endast siffror"}
               />
 
-              {/* desktop keypad */}
-              <div className="hidden sm:grid grid-cols-3 gap-2">
-                {[1,2,3,4,5,6,7,8,9].map((n) => (
-                  <button key={n} className="kbd" onClick={() => tap(n)}>{n}</button>
-                ))}
-                <button className="kbd" onClick={() => setAnswer((p) => p.slice(0, -1))}>⌫</button>
-                <button className="kbd" onClick={() => tap(0)}>0</button>
-                <button
-                  className="kbd-primary"
-                  disabled={submitting || answer.length === 0}
-                  onClick={submit}
-                  aria-label="Skicka svar"
-                >
-                  ✅
-                </button>
-              </div>
-
-              {feedback ? (
-                <div className="mt-4 rounded-xl border border-white/10 bg-black/20 p-3 text-sm opacity-90">
-                  {feedback}
+              {/* Keypad in-card */}
+              <div className="mx-auto w-full max-w-xs sm:max-w-sm">
+                <div className="grid grid-cols-3 gap-2">
+                  {[1,2,3,4,5,6,7,8,9].map((n) => (
+                    <button key={n} className="kbd" onClick={() => tap(n)}>{n}</button>
+                  ))}
+                  <button className="kbd" onClick={() => setAnswer((p) => p.slice(0, -1))}>⌫</button>
+                  <button className="kbd" onClick={() => tap(0)}>0</button>
+                  <button
+                    className="kbd-primary"
+                    disabled={submitting || answer.length === 0}
+                    onClick={submit}
+                    aria-label="Skicka svar"
+                  >
+                    ✅
+                  </button>
                 </div>
-              ) : null}
+              </div>
             </section>
           </div>
         )}
       </main>
-
-      {/* mobile dock keypad */}
-      {!finished && !loading && !error && (
-        <div className="fixed inset-x-0 bottom-0 z-20 border-t border-white/10 bg-black/55 backdrop-blur sm:hidden">
-          <div className="mx-auto max-w-6xl px-4 py-3">
-            <div className="grid grid-cols-3 gap-2">
-              {[1,2,3,4,5,6,7,8,9].map((n) => (
-                <button key={`m-${n}`} className="kbd" onClick={() => tap(n)}>{n}</button>
-              ))}
-              <button className="kbd" onClick={() => setAnswer((p) => p.slice(0, -1))}>⌫</button>
-              <button className="kbd" onClick={() => tap(0)}>0</button>
-              <button
-                className="kbd-primary"
-                disabled={submitting || answer.length === 0}
-                onClick={submit}
-              >
-                ✅
-              </button>
-            </div>
-            {feedback ? (
-              <div className="mt-2 rounded-lg border border-white/10 bg-white/5 p-2 text-sm text-white/90">
-                {feedback}
-              </div>
-            ) : null}
-          </div>
-        </div>
-      )}
     </div>
   );
 }

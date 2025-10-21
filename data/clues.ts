@@ -31,7 +31,7 @@ export const CLUES: ClueConfig[] = [
       "Skåp sju vaktar hemligheten väl,\nTvå skuggor dansar runt andens själ,\nEn viskning hörs från stenarnas famn,\nOm fyra lågornas tysta namn.",
     // Exempel på flersiffrig kod:
     type: "code",
-    expected: "7214",
+    expected: "6",
     durationSec: 5 * 60,
     active: true,
   },

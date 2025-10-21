@@ -37,7 +37,7 @@ export const CLUES: ClueConfig[] = [
   },
     {
     id: "clue_medicinecabinet",
-    title: "Medicinskåp"
+    title: "Medicinskåp", 
     icon: "🚑" ,
     riddle:
     "När smärtan är nära, är lindringen gömd, \nBakom det som lindar hand, tår och fingrar \n I skåpet där vård blir till tröst, \n sök där det mjuka döljer sin röst.",

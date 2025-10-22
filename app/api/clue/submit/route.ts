@@ -8,6 +8,7 @@ import { teams, submissions } from "@/lib/schema";
 const WRONG_PENALTY_SEC = 30;
 const COOLDOWN_MS = 3000;
 const DEFAULT_CLUE_SECONDS = 5 * 60;
+const QUESTIONS_PER_TEAM = 4;
 
 // Robust laddning av data/clues.ts oavsett exportformat
 async function getClues(): Promise<any[]> {
@@ -28,10 +29,22 @@ export async function POST(req: Request) {
     const [team] = await db.select().from(teams).where(eq(teams.id, teamId));
     if (!team) return NextResponse.json({ ok: false, error: "Team not found" }, { status: 404 });
 
-    const all = (await getClues()).filter((c) => !!c.active) as any[];
-    const total = all.length;
-    const step = Math.max(0, Math.min(Number(team.step ?? 0), Math.max(total - 1, 0)));
-    const current = all[step];
+    const ALL = await getClues();
+    const active = ALL.filter((c) => !!c?.active);
+
+    // Säkerställ orderIds
+    let orderIds: number[] = Array.isArray(team.orderIds) ? (team.orderIds as number[]) : [];
+    if (orderIds.length !== QUESTIONS_PER_TEAM || orderIds.some((x) => typeof x !== "number")) {
+      // fallback – current/route.ts kommer att re-seeda vid nästa GET
+      orderIds = Array.from({ length: Math.min(QUESTIONS_PER_TEAM, active.length) }, (_, i) => i);
+      await db.update(teams).set({ orderIds }).where(eq(teams.id, teamId));
+    }
+
+    const total: number = orderIds.length;
+    const step: number = Math.max(0, Math.min(Number(team.step ?? 0), Math.max(total - 1, 0)));
+    const clueIdx: number = orderIds[step] ?? -1;
+    const current = clueIdx >= 0 && clueIdx < active.length ? active[clueIdx] : undefined;
+
     if (!current) {
       return NextResponse.json({ ok: false, error: "No current clue" }, { status: 400 });
     }
@@ -52,13 +65,13 @@ export async function POST(req: Request) {
 
     const now = new Date();
 
-    // kvarvarande tid just nu (för loggen och adminvisning)
+    // kvarvarande tid för logg/admin
     const startedAtMs = (team.startedAt as Date | null)?.getTime() ?? Date.now();
     const penalties = Number((team.penaltiesSec as number | null) ?? 0);
     const deadline = new Date(startedAtMs + (DEFAULT_CLUE_SECONDS + penalties) * 1000);
     const timeLeftSec = Math.max(0, Math.floor((deadline.getTime() - now.getTime()) / 1000));
 
-    // logga submission (din schema: digit/correct/timeLeftAtSubmit/submittedAt)
+    // logga submission (din schema)
     const digitValue = isDigitAttempt ? Number(normalized) : -1;
     await db.insert(submissions).values({
       teamId,
@@ -69,22 +82,23 @@ export async function POST(req: Request) {
     });
 
     if (isCorrect) {
-      const ret = await db
-        .update(teams)
-        .set({
-          step: Number(team.step ?? 0) + 1,
-          lastWrongAt: null,
-          lockedUntil: null,
-        })
-        .where(eq(teams.id, teamId))
-        .returning();
+      const isLast = step + 1 >= total;
+      const update: any = {
+        step: Number(team.step ?? 0) + 1,
+        lastWrongAt: null,
+        lockedUntil: null,
+      };
+      if (isLast) update.completedAt = now;
 
-      const updated = ret?.[0] ?? { id: teamId, step: Number(team.step ?? 0) + 1 };
+      const ret = await db.update(teams).set(update).where(eq(teams.id, teamId)).returning();
+      const updated = ret?.[0] ?? { id: teamId, step: (team.step ?? 0) + 1 };
 
       return NextResponse.json({
         ok: true,
         result: "correct",
+        correct: true,
         team: { id: updated.id, step: updated.step, total },
+        finished: isLast,
       });
     }
 
@@ -103,6 +117,7 @@ export async function POST(req: Request) {
     return NextResponse.json({
       ok: true,
       result: "wrong",
+      correct: false,
       penaltyAppliedSec: tooSoon ? 0 : WRONG_PENALTY_SEC,
       cooldownSec: Math.ceil(COOLDOWN_MS / 1000),
     });

@@ -54,6 +54,7 @@ export default function AdminPage() {
         [t.teamName, t.participants || ""].join(" ").toLowerCase().includes(f)
       );
     }
+    // FIX: spridningsoperatorn hade typo ".arr" -> "...arr"
     arr = [...arr].sort((a, b) => {
       const A = (a[sortKey] ?? "") as any;
       const B = (b[sortKey] ?? "") as any;
@@ -195,9 +196,7 @@ export default function AdminPage() {
                         : "—"}
                     </td>
                     <td>
-                      {t.completedAt
-                        ? fmtSecs(t.timeLeftAtFinishSec)
-                        : "—"}
+                      {t.completedAt ? fmtSecs(t.timeLeftAtFinishSec) : "—"}
                     </td>
                     <td>
                       {t.step ?? 0}/{t.totalClues ?? "?"}
@@ -223,8 +222,7 @@ export default function AdminPage() {
               return (
                 <div key={t.id} className="rounded-lg border border-white/10 p-3">
                   <div className="text-sm font-semibold opacity-80 mb-1">
-                    Medlemmar i{" "}
-                    <span className="opacity-100">{t.teamName}</span>
+                    Medlemmar i <span className="opacity-100">{t.teamName}</span>
                   </div>
                   {members.length ? (
                     <ul className="list-disc pl-5 text-sm space-y-0.5">
@@ -233,9 +231,7 @@ export default function AdminPage() {
                       ))}
                     </ul>
                   ) : (
-                    <div className="text-sm opacity-60">
-                      Inga registrerade namn.
-                    </div>
+                    <div className="text-sm opacity-60">Inga registrerade namn.</div>
                   )}
                 </div>
               );

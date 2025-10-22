@@ -1,16 +1,19 @@
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+export const fetchCache = "force-no-store";
 
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { teams, submissions, contentClues } from "@/lib/schema";
-import { desc, eq } from "drizzle-orm";
+import { eq, desc } from "drizzle-orm";
 
 export async function GET() {
   try {
-    // Hämta alla lag
-    const teamRows = await db.select().from(teams);
+    // Hämta alla lag (nyast först från DB för stabilitet)
+    const teamRows = await db.select().from(teams).orderBy(desc(teams.createdAt));
 
-    // Felgissningar per lag (correct = false)
+    // Hämta alla submissions en gång
     const allSubs = await db
       .select({
         id: submissions.id,
@@ -22,7 +25,10 @@ export async function GET() {
       .from(submissions);
 
     const wrongByTeam = new Map<string, number>();
-    const lastCorrectByTeam = new Map<string, { submittedAt: Date; timeLeftAtSubmit: number | null }>();
+    const lastCorrectByTeam = new Map<
+      string,
+      { submittedAt: Date; timeLeftAtSubmit: number | null }
+    >();
 
     for (const s of allSubs) {
       if (!s.correct) {
@@ -38,7 +44,7 @@ export async function GET() {
       }
     }
 
-    // Antal aktiva gåtor för referens
+    // Antal aktiva gåtor (används bara som referens i admin)
     const activeClues = await db
       .select()
       .from(contentClues)
@@ -62,9 +68,7 @@ export async function GET() {
       };
     });
 
-    // Sortera stabilt (t.ex. på createdAt fallande)
-    teamsOut.sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""));
-
+    // Behåll “nyast först” även i svaret
     return NextResponse.json({ ok: true, teams: teamsOut });
   } catch (err: any) {
     console.error("overview GET failed:", err?.message || err);

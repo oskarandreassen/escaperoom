@@ -4,8 +4,7 @@ export const runtime = "nodejs";
 import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { teams, submissions } from "@/lib/schema";
-import { CLUES, DEFAULT_CLUE_SECONDS } from "@/data/clues";
+import { teams, submissions, contentClues } from "@/lib/schema";
 
 const WRONG_PENALTY_SEC = 30;
 const COOLDOWN_MS = 3000;
@@ -13,96 +12,97 @@ const COOLDOWN_MS = 3000;
 export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => ({}));
-    const teamId: unknown = body?.teamId;
-    const answer: unknown = body?.answer; // numerisk sträng, t.ex. "3" eller "7214"
+    const teamId: string | undefined = body?.teamId;
+    const answer: string | undefined =
+      typeof body?.answer === "string"
+        ? body.answer
+        : typeof body?.digit === "number"
+        ? String(body.digit)
+        : undefined;
 
-    if (typeof teamId !== "string" || !teamId) {
-      return NextResponse.json({ ok: false, error: "Missing teamId" }, { status: 400 });
-    }
-    if (typeof answer !== "string" || answer.length === 0 || !/^\d+$/.test(answer)) {
-      return NextResponse.json({ ok: false, error: "Answer must be a non-empty numeric string" }, { status: 400 });
-    }
+    if (!teamId) return NextResponse.json({ ok: false, error: "Missing teamId" }, { status: 400 });
+    if (answer == null) return NextResponse.json({ ok: false, error: "Missing answer" }, { status: 400 });
 
     const [team] = await db.select().from(teams).where(eq(teams.id, teamId));
     if (!team) return NextResponse.json({ ok: false, error: "Team not found" }, { status: 404 });
 
-    const activeClues = CLUES.filter((c) => c.active !== false);
-    const total = activeClues.length;
-    const step = Math.min(Math.max(typeof team.step === "number" ? team.step : 0, 0), Math.max(total - 1, 0));
-    if (team.completedAt || step >= total) {
-      return NextResponse.json({ ok: true, result: "finished" });
+    // Hämta nuvarande gåta
+    const all = await db
+      .select()
+      .from(contentClues)
+      .where(eq(contentClues.active, true))
+      .orderBy(contentClues.orderIdx);
+
+    const total = all.length;
+    const step = Math.max(0, Math.min(Number(team.step ?? 0), Math.max(total - 1, 0)));
+    const current = all[step];
+
+    if (!current) {
+      return NextResponse.json({ ok: false, error: "No current clue" }, { status: 400 });
     }
 
-    const clue = activeClues[step];
-    if (!clue) return NextResponse.json({ ok: false, error: "Clue not found" }, { status: 404 });
+    const expected =
+      current.type === "digit"
+        ? String(current.expectedDigit ?? "")
+        : String(current.expectedCode ?? "");
 
-    // Cooldown
+    const normalized = answer.replace(/\s+/g, "");
+    const isCorrect = normalized === expected;
+
     const now = new Date();
-    if (team.lastWrongAt) {
-      const diff = now.getTime() - new Date(team.lastWrongAt).getTime();
-      if (diff < COOLDOWN_MS) {
-        return NextResponse.json(
-          { ok: false, error: "cooldown", retryAfterSec: Math.ceil((COOLDOWN_MS - diff) / 1000) },
-          { status: 429 }
-        );
-      }
-    }
 
-    // Deadline (per-ledtråd)
-    const clueSeconds = typeof clue.durationSec === "number" ? clue.durationSec : DEFAULT_CLUE_SECONDS;
-    let deadline = team.lockedUntil ? new Date(team.lockedUntil) : null;
-    if (!deadline || deadline <= now) {
-      deadline = new Date(now.getTime() + clueSeconds * 1000);
-      await db.update(teams).set({ lockedUntil: deadline }).where(eq(teams.id, teamId));
-    }
-    const timeLeftAtSubmit = Math.max(0, Math.floor((deadline.getTime() - now.getTime()) / 1000));
+    // Spara submission
+    const [saved] = await db
+      .insert(submissions)
+      .values({
+        teamId,
+        clueId: current.id,
+        submittedAt: now,
+        answer: normalized,
+        isCorrect,
+      })
+      .returning();
 
-    // Spara submission (legacy-kolumn digit fylls med första siffran)
-    await db.insert(submissions).values({
-      teamId: team.id,
-      digit: parseInt((answer as string).charAt(0), 10), // <-- fix: .charAt(0) är alltid string
-      correct: (answer as string) === clue.expected,
-      submittedAt: now,
-      timeLeftAtSubmit,
-    });
-
-    if ((answer as string) === clue.expected) {
-      const isLast = step >= total - 1;
-      await db
+    if (isCorrect) {
+      // Rätt svar -> bumpa step och nollställ ev. cooldown-flagga
+      const [updated] = await db
         .update(teams)
         .set({
-          step: isLast ? step : step + 1,
-          lockedUntil: null,
-          completedAt: isLast ? now : team.completedAt,
+          step: Number(team.step ?? 0) + 1,
+          lastWrongAt: null,
         })
-        .where(eq(teams.id, teamId));
+        .where(eq(teams.id, teamId))
+        .returning();
 
       return NextResponse.json({
         ok: true,
         result: "correct",
-        finished: isLast,
-        nextStep: isLast ? step : step + 1,
+        team: { id: updated.id, step: updated.step, total },
       });
     }
 
-    // Fel svar → -30s + cooldown
-    const newDeadlineMs = Math.max(now.getTime(), deadline.getTime() - WRONG_PENALTY_SEC * 1000);
-    const newDeadline = new Date(newDeadlineMs);
+    // Fel svar -> cooldown och straff
+    const lastWrongAt = team.lastWrongAt ? new Date(team.lastWrongAt) : null;
+    const tooSoon =
+      lastWrongAt && now.getTime() - lastWrongAt.getTime() < COOLDOWN_MS;
 
-    await db
-      .update(teams)
-      .set({
-        lockedUntil: newDeadline,
-        lastWrongAt: now,
-        penaltiesSec: (team.penaltiesSec ?? 0) + WRONG_PENALTY_SEC,
-      })
-      .where(eq(teams.id, teamId));
+    // uppdatera strafftid endast om inte "tooSoon" (annars kan man få flera straff på sekunden)
+    const newDeadline = new Date(
+      (team.deadline ? new Date(team.deadline).getTime() : Date.now()) + WRONG_PENALTY_SEC * 1000
+    );
+
+    const upd: any = { lastWrongAt: now };
+    if (!tooSoon) {
+      upd.penaltiesSec = Number(team.penaltiesSec ?? 0) + WRONG_PENALTY_SEC;
+      upd.deadline = newDeadline;
+    }
+
+    await db.update(teams).set(upd).where(eq(teams.id, teamId));
 
     return NextResponse.json({
       ok: true,
       result: "wrong",
-      penaltyAppliedSec: WRONG_PENALTY_SEC,
-      timeLeftSec: Math.max(0, Math.floor((newDeadline.getTime() - now.getTime()) / 1000)),
+      penaltyAppliedSec: tooSoon ? 0 : WRONG_PENALTY_SEC,
       cooldownSec: Math.ceil(COOLDOWN_MS / 1000),
     });
   } catch (err) {

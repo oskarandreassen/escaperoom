@@ -2,10 +2,11 @@
 export const runtime = "nodejs";
 
 import { NextResponse } from "next/server";
-import { eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { teams } from "@/lib/schema";
-import { CLUES, DEFAULT_CLUE_SECONDS } from "@/data/clues";
+import { teams, contentClues } from "@/lib/schema";
+
+const DEFAULT_CLUE_SECONDS = 5 * 60;
 
 export async function GET(req: Request) {
   const url = new URL(req.url);
@@ -15,52 +16,53 @@ export async function GET(req: Request) {
   const [team] = await db.select().from(teams).where(eq(teams.id, teamId));
   if (!team) return NextResponse.json({ ok: false, error: "Team not found" }, { status: 404 });
 
-  // Filtrera på aktiva gåtor
-  const activeClues = CLUES.filter((c) => c.active !== false);
-  const total = activeClues.length;
-  const step = Math.min(Math.max(typeof team.step === "number" ? team.step : 0, 0), Math.max(total - 1, 0));
+  // Hämta aktiva gåtor i ordning
+  const clues = await db
+    .select()
+    .from(contentClues)
+    .where(eq(contentClues.active, true))
+    .orderBy(asc(contentClues.orderIdx));
 
-  // Om laget redan är klart: returnera "finished" + totaltid, och starta inte någon ny timer.
-  if (team.completedAt && team.startedAt) {
-    const totalMs = new Date(team.completedAt).getTime() - new Date(team.startedAt).getTime();
-    const totalSec = Math.max(0, Math.floor(totalMs / 1000));
+  const total = clues.length;
+  const step = Math.max(0, Math.min(Number(team.step ?? 0), Math.max(total - 1, 0)));
+
+  if (total === 0) {
+    return NextResponse.json({
+      ok: true,
+      finished: true,
+      team: { id: team.id, step: 0, total: 0 },
+      totalTimeSec: 0,
+    });
+  }
+
+  // Klar?
+  if (team.completedAt) {
+    return NextResponse.json({
+      ok: true,
+      finished: true,
+      team: { id: team.id, step, total },
+      totalTimeSec: Math.floor(((team.completedAt as Date).getTime() - (team.startedAt as Date).getTime()) / 1000),
+    });
+  }
+
+  const current = clues[step];
+  if (!current) {
+    // beyond last step => finished
     return NextResponse.json({
       ok: true,
       finished: true,
       team: { id: team.id, step: total, total },
-      totalTimeSec: totalSec,
+      totalTimeSec: team.startedAt ? Math.floor((Date.now() - (team.startedAt as Date).getTime()) / 1000) : 0,
     });
   }
 
-  if (total === 0) {
-    return NextResponse.json({ ok: false, error: "No active clues in config" }, { status: 500 });
-  }
-
-  const clue = activeClues[step];
-  if (!clue) {
-    return NextResponse.json({ ok: false, error: "Clue not found for step" }, { status: 404 });
-  }
-
-  // Bestäm per-ledtråd-tid
-  const clueSeconds = typeof clue.durationSec === "number" ? clue.durationSec : DEFAULT_CLUE_SECONDS;
-
-  // Timerhantering: använd teams.lockedUntil som "deadline" för pågående ledtråd.
+  // Deadline: per-step duration, startat + ev. straff (penaltiesSec)
+  const per = Number(current.durationSec ?? DEFAULT_CLUE_SECONDS);
+  const baseStart = team.deadline ? (team.deadline as Date).getTime() - per * 1000 : Date.now();
+  const startedAtMs = team.deadline ? baseStart : (team.startedAt as Date | null)?.getTime() ?? Date.now();
+  const penalties = Number(team.penaltiesSec ?? 0);
+  const deadline = new Date(startedAtMs + (per + penalties) * 1000);
   const now = new Date();
-  let deadline = team.lockedUntil ? new Date(team.lockedUntil) : null;
-
-  // Starta deadline om saknas eller passerad OCH laget inte är klart
-  if (!deadline || deadline <= now) {
-    const newDeadline = new Date(now.getTime() + clueSeconds * 1000);
-    await db
-      .update(teams)
-      .set({
-        startedAt: team.startedAt ?? now,
-        lockedUntil: newDeadline,
-      })
-      .where(eq(teams.id, teamId));
-    deadline = newDeadline;
-  }
-
   const timeLeftSec = Math.max(0, Math.floor((deadline.getTime() - now.getTime()) / 1000));
 
   return NextResponse.json({
@@ -68,11 +70,11 @@ export async function GET(req: Request) {
     finished: false,
     team: { id: team.id, step, total },
     clue: {
-      id: clue.id,
-      title: clue.title,
-      icon: clue.icon,
-      riddle: clue.riddle,
-      type: clue.type,
+      id: current.id,
+      title: current.title,
+      icon: current.icon ?? "",
+      riddle: current.riddle,
+      type: current.type,
     },
     deadline: deadline.toISOString(),
     timeLeftSec,

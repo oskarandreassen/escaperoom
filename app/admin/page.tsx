@@ -44,10 +44,20 @@ export default function AdminPage() {
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 
   async function load() {
-    const res = await fetch("/api/admin/overview", { cache: "no-store" });
-    const json = (await res.json()) as OverviewResp;
-    if (json?.ok) setData(json);
+    try {
+      const res = await fetch("/api/admin/overview", { cache: "no-store" });
+      if (!res.ok) {
+        const raw = await res.text().catch(() => "");
+        console.error("overview error:", raw);
+        return; // visa tyst fel i UI, behåll nuvarande data
+      }
+      const json = (await res.json()) as OverviewResp;
+      if (json?.ok) setData(json);
+    } catch (e) {
+      console.error("overview fetch failed:", e);
+    }
   }
+
 
   useEffect(() => {
     load();

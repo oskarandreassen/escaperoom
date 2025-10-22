@@ -40,7 +40,7 @@ export const CLUES: ClueConfig[] = [
     title: "Medicinskåp", 
     icon: "🚑" ,
     riddle:
-    "När smärtan är nära, är lindringen gömd, \nBakom det som lindar hand, tår och fingrar \n I skåpet där vård blir till tröst, \n sök där det mjuka döljer sin röst.",
+    "Du söker en ledtråd, men vart ska du gå? \nKanske där vården har haft något på \n Är man klantig kan man tappa ett klot, \n Kanske nästa ledtråd kan linda din fot.",
     type: "code",
     expected: "9", 
     durationSec: 5 * 60,

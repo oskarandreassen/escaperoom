@@ -12,7 +12,7 @@ type TeamRow = {
   step?: number | null;
   totalClues?: number | null;
   wrongGuesses: number;
-  timeLeftAtFinishSec?: number | null; // NYTT: hur mycket tid kvar när de klarade
+  timeLeftAtFinishSec?: number | null;
 };
 
 type OverviewResp = {
@@ -31,7 +31,6 @@ export default function AdminPage() {
     try {
       const res = await fetch("/api/admin/overview", { cache: "no-store" });
       if (!res.ok) {
-        // visa inte fel-popup—logga bara
         console.error("overview error:", await res.text().catch(() => ""));
         return;
       }
@@ -75,7 +74,6 @@ export default function AdminPage() {
     const m = Math.floor(s / 60);
     const r = s % 60;
     return `${m}m ${String(r).padStart(2, "0")}s`;
-    // vill du ha 0m 00s exakt: funkar redan så
   }
 
   return (
@@ -85,7 +83,9 @@ export default function AdminPage() {
         <form
           onSubmit={(e) => {
             e.preventDefault();
-            fetch("/api/admin/login", { method: "DELETE" }).then(() => (window.location.href = "/"));
+            fetch("/api/admin/login", { method: "DELETE" }).then(
+              () => (window.location.href = "/")
+            );
           }}
         >
           <button className="rounded-md border border-white/10 bg-neutral-900 px-3 py-1.5">
@@ -151,6 +151,7 @@ export default function AdminPage() {
               <tr>
                 <th className="py-2">Grupp</th>
                 <th>Spelare</th>
+                <th>Deltagare</th>
                 <th>Start</th>
                 <th>Tid kvar när klar</th>
                 <th>Steg</th>
@@ -158,6 +159,7 @@ export default function AdminPage() {
                 <th>Resultat</th>
               </tr>
             </thead>
+
             <tbody>
               {filteredTeams.map((t) => {
                 const members = (t.participants || "")
@@ -166,12 +168,11 @@ export default function AdminPage() {
                   .filter(Boolean);
                 const playersCount = members.length || 0;
 
-                const result =
-                  t.completedAt
-                    ? "Klar"
-                    : t.startedAt
-                    ? "Pågår/Timeout?"
-                    : "Inte startad";
+                const result = t.completedAt
+                  ? "Klar"
+                  : t.startedAt
+                  ? "Pågår/Timeout?"
+                  : "Inte startad";
 
                 return (
                   <tr key={t.id} className="border-top border-white/5">
@@ -185,9 +186,18 @@ export default function AdminPage() {
                       </button>
                     </td>
                     <td>{playersCount}</td>
-                    <td>{t.startedAt ? new Date(t.startedAt).toLocaleString() : "—"}</td>
+                    <td style={{ whiteSpace: "pre-wrap" }}>
+                      {t.participants || "—"}
+                    </td>
                     <td>
-                      {t.completedAt ? fmtSecs(t.timeLeftAtFinishSec) : "—"}
+                      {t.startedAt
+                        ? new Date(t.startedAt).toLocaleString()
+                        : "—"}
+                    </td>
+                    <td>
+                      {t.completedAt
+                        ? fmtSecs(t.timeLeftAtFinishSec)
+                        : "—"}
                     </td>
                     <td>
                       {t.step ?? 0}/{t.totalClues ?? "?"}
@@ -213,7 +223,8 @@ export default function AdminPage() {
               return (
                 <div key={t.id} className="rounded-lg border border-white/10 p-3">
                   <div className="text-sm font-semibold opacity-80 mb-1">
-                    Medlemmar i <span className="opacity-100">{t.teamName}</span>
+                    Medlemmar i{" "}
+                    <span className="opacity-100">{t.teamName}</span>
                   </div>
                   {members.length ? (
                     <ul className="list-disc pl-5 text-sm space-y-0.5">
@@ -222,7 +233,9 @@ export default function AdminPage() {
                       ))}
                     </ul>
                   ) : (
-                    <div className="text-sm opacity-60">Inga registrerade namn.</div>
+                    <div className="text-sm opacity-60">
+                      Inga registrerade namn.
+                    </div>
                   )}
                 </div>
               );

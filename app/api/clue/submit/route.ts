@@ -10,7 +10,6 @@ const COOLDOWN_MS = 3000;
 const DEFAULT_CLUE_SECONDS = 5 * 60;
 const QUESTIONS_PER_TEAM = 4;
 
-// Robust laddning av data/clues.ts oavsett exportformat
 async function getClues(): Promise<any[]> {
   const mod: any = await import("../../../../data/clues");
   return mod?.CLUES ?? mod?.default ?? mod?.clues ?? [];
@@ -23,8 +22,7 @@ export async function POST(req: Request) {
     const rawAnswer: string | number | undefined = body?.answer ?? body?.digit;
 
     if (!teamId) return NextResponse.json({ ok: false, error: "Missing teamId" }, { status: 400 });
-    if (rawAnswer == null)
-      return NextResponse.json({ ok: false, error: "Missing answer" }, { status: 400 });
+    if (rawAnswer == null) return NextResponse.json({ ok: false, error: "Missing answer" }, { status: 400 });
 
     const [team] = await db.select().from(teams).where(eq(teams.id, teamId));
     if (!team) return NextResponse.json({ ok: false, error: "Team not found" }, { status: 404 });
@@ -32,47 +30,48 @@ export async function POST(req: Request) {
     const ALL = await getClues();
     const active = ALL.filter((c) => !!c?.active);
 
-    // Säkerställ orderIds
+    // Make sure order exists (current endpoint reseeds on GET anyway)
     let orderIds: number[] = Array.isArray(team.orderIds) ? (team.orderIds as number[]) : [];
     if (orderIds.length !== QUESTIONS_PER_TEAM || orderIds.some((x) => typeof x !== "number")) {
-      // fallback – current/route.ts kommer att re-seeda vid nästa GET
       orderIds = Array.from({ length: Math.min(QUESTIONS_PER_TEAM, active.length) }, (_, i) => i);
       await db.update(teams).set({ orderIds }).where(eq(teams.id, teamId));
     }
 
-    const total: number = orderIds.length;
-    const step: number = Math.max(0, Math.min(Number(team.step ?? 0), Math.max(total - 1, 0)));
-    const clueIdx: number = orderIds[step] ?? -1;
+    const total = orderIds.length;
+    const step = Math.max(0, Math.min(Number(team.step ?? 0), Math.max(total - 1, 0)));
+    const clueIdx = orderIds[step] ?? -1;
     const current = clueIdx >= 0 && clueIdx < active.length ? active[clueIdx] : undefined;
+    if (!current) return NextResponse.json({ ok: false, error: "No current clue" }, { status: 400 });
 
-    if (!current) {
-      return NextResponse.json({ ok: false, error: "No current clue" }, { status: 400 });
-    }
+    // === YOUR SHAPE ===
+    // type: "digit" | "code"
+    // expected: string
+    const type = current?.type === "code" ? "code" : "digit";
+    const expected = String(current?.expected ?? "").trim();
 
-    const expectedDigit = current?.expectedDigit ?? null;
-    const expectedCode = (current?.verification as string | null) ?? null;
-
-    const normalized =
-      typeof rawAnswer === "number" ? String(rawAnswer) : String(rawAnswer || "").trim();
-    const isDigitAttempt = /^\d+$/.test(normalized);
+    const normalized = typeof rawAnswer === "number" ? String(rawAnswer) : String(rawAnswer || "").trim();
 
     let isCorrect = false;
-    if (expectedCode && expectedCode.length > 0) {
-      isCorrect = normalized === expectedCode;
+    if (type === "code") {
+      // exact string match
+      isCorrect = normalized === expected;
     } else {
-      isCorrect = isDigitAttempt && Number(normalized) === Number(expectedDigit ?? NaN);
+      // digit: compare numerically
+      const n = Number(normalized);
+      const en = Number(expected);
+      isCorrect = Number.isFinite(n) && Number.isFinite(en) && n === en;
     }
 
     const now = new Date();
 
-    // kvarvarande tid för logg/admin
+    // time left at submit
     const startedAtMs = (team.startedAt as Date | null)?.getTime() ?? Date.now();
     const penalties = Number((team.penaltiesSec as number | null) ?? 0);
     const deadline = new Date(startedAtMs + (DEFAULT_CLUE_SECONDS + penalties) * 1000);
     const timeLeftSec = Math.max(0, Math.floor((deadline.getTime() - now.getTime()) / 1000));
 
-    // logga submission (din schema)
-    const digitValue = isDigitAttempt ? Number(normalized) : -1;
+    // log submission
+    const digitValue = /^\d+$/.test(normalized) ? Number(normalized) : -1;
     await db.insert(submissions).values({
       teamId,
       digit: digitValue,
@@ -83,11 +82,7 @@ export async function POST(req: Request) {
 
     if (isCorrect) {
       const isLast = step + 1 >= total;
-      const update: any = {
-        step: Number(team.step ?? 0) + 1,
-        lastWrongAt: null,
-        lockedUntil: null,
-      };
+      const update: any = { step: Number(team.step ?? 0) + 1, lastWrongAt: null, lockedUntil: null };
       if (isLast) update.completedAt = now;
 
       const ret = await db.update(teams).set(update).where(eq(teams.id, teamId)).returning();
@@ -102,7 +97,7 @@ export async function POST(req: Request) {
       });
     }
 
-    // fel svar → cooldown + straff
+    // wrong → cooldown + penalty
     const lastWrongAt = team.lastWrongAt ? new Date(team.lastWrongAt) : null;
     const tooSoon = lastWrongAt && now.getTime() - lastWrongAt.getTime() < COOLDOWN_MS;
 

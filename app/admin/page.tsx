@@ -20,12 +20,21 @@ type OverviewResp = {
   teams: TeamRow[];
 };
 
+type DatePreset = "all" | "today" | "yesterday" | "7d" | "thisweek" | "30d" | "custom";
+type StatusFilter = "all" | "klar" | "ongoing" | "notstarted";
+
 export default function AdminPage() {
   const [data, setData] = useState<OverviewResp | null>(null);
   const [filter, setFilter] = useState("");
   const [sortKey, setSortKey] = useState<keyof TeamRow>("createdAt");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+
+  // nya filterstates
+  const [datePreset, setDatePreset] = useState<DatePreset>("all");
+  const [rangeStart, setRangeStart] = useState<string>("");
+  const [rangeEnd, setRangeEnd] = useState<string>("");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
 
   async function load() {
     try {
@@ -45,26 +54,6 @@ export default function AdminPage() {
     load();
   }, []);
 
-  const filteredTeams = useMemo(() => {
-    if (!data) return [];
-    const f = filter.trim().toLowerCase();
-    let arr = data.teams;
-    if (f) {
-      arr = arr.filter((t) =>
-        [t.teamName, t.participants || ""].join(" ").toLowerCase().includes(f)
-      );
-    }
-    // FIX: spridningsoperatorn hade typo ".arr" -> "...arr"
-    arr = [...arr].sort((a, b) => {
-      const A = (a[sortKey] ?? "") as any;
-      const B = (b[sortKey] ?? "") as any;
-      if (A < B) return sortDir === "asc" ? -1 : 1;
-      if (A > B) return sortDir === "asc" ? 1 : -1;
-      return 0;
-    });
-    return arr;
-  }, [data, filter, sortKey, sortDir]);
-
   function toggleExpand(id: string) {
     setExpanded((p) => ({ ...p, [id]: !p[id] }));
   }
@@ -76,6 +65,129 @@ export default function AdminPage() {
     const r = s % 60;
     return `${m}m ${String(r).padStart(2, "0")}s`;
   }
+
+  // helpers för datumfiltrering
+  function getComparableDate(t: TeamRow): Date | null {
+    // använd starttid om den finns, annars createdAt
+    const iso = t.startedAt ?? t.createdAt ?? null;
+    return iso ? new Date(iso) : null;
+  }
+  function startOfToday() {
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    return d;
+  }
+  function endOfToday() {
+    const d = new Date();
+    d.setHours(23, 59, 59, 999);
+    return d;
+  }
+  function startOfYesterday() {
+    const d = startOfToday();
+    d.setDate(d.getDate() - 1);
+    return d;
+  }
+  function endOfYesterday() {
+    const d = endOfToday();
+    d.setDate(d.getDate() - 1);
+    return d;
+  }
+  function startOfThisWeekMonday() {
+    const d = startOfToday();
+    const day = d.getDay(); // 0=Sun..6=Sat
+    const diff = (day + 6) % 7; // måndag=0
+    d.setDate(d.getDate() - diff);
+    return d;
+  }
+  function dateRangeForPreset(p: DatePreset): [Date | null, Date | null] {
+    switch (p) {
+      case "today":
+        return [startOfToday(), endOfToday()];
+      case "yesterday":
+        return [startOfYesterday(), endOfYesterday()];
+      case "7d": {
+        const end = endOfToday();
+        const start = new Date(end);
+        start.setDate(start.getDate() - 6);
+        start.setHours(0, 0, 0, 0);
+        return [start, end];
+      }
+      case "thisweek": {
+        const start = startOfThisWeekMonday();
+        const end = endOfToday();
+        return [start, end];
+      }
+      case "30d": {
+        const end = endOfToday();
+        const start = new Date(end);
+        start.setDate(start.getDate() - 29);
+        start.setHours(0, 0, 0, 0);
+        return [start, end];
+      }
+      case "custom": {
+        const s = rangeStart ? new Date(rangeStart + "T00:00:00") : null;
+        const e = rangeEnd ? new Date(rangeEnd + "T23:59:59") : null;
+        return [s, e];
+      }
+      default:
+        return [null, null]; // "all"
+    }
+  }
+  function inRange(d: Date | null, start: Date | null, end: Date | null) {
+    if (!d) return false; // om ingen tid → exkludera i datumfilter
+    if (start && d < start) return false;
+    if (end && d > end) return false;
+    return true;
+  }
+
+  const filteredTeams = useMemo(() => {
+    if (!data) return [];
+    const f = filter.trim().toLowerCase();
+    let arr = data.teams;
+
+    // textfilter
+    if (f) {
+      arr = arr.filter((t) =>
+        [t.teamName, t.participants || ""].join(" ").toLowerCase().includes(f)
+      );
+    }
+
+    // statusfilter
+    if (statusFilter !== "all") {
+      arr = arr.filter((t) => {
+        const result = t.completedAt
+          ? "klar"
+          : t.startedAt
+          ? "ongoing"
+          : "notstarted";
+        return result === statusFilter;
+      });
+    }
+
+    // datumfilter
+    const [start, end] = dateRangeForPreset(datePreset);
+    if (start || end) {
+      arr = arr.filter((t) => inRange(getComparableDate(t), start, end));
+    }
+
+    // sortering
+    arr = [...arr].sort((a, b) => {
+      const A = (a[sortKey] ?? "") as any;
+      const B = (b[sortKey] ?? "") as any;
+      if (A < B) return sortDir === "asc" ? -1 : 1;
+      if (A > B) return sortDir === "asc" ? 1 : -1;
+      return 0;
+    });
+    return arr;
+  }, [data, filter, sortKey, sortDir, datePreset, rangeStart, rangeEnd, statusFilter]);
+
+  // om presetet byts från custom -> nolla custom-fält för tydlighet
+  useEffect(() => {
+    if (datePreset !== "custom") {
+      setRangeStart("");
+      setRangeEnd("");
+    }
+  }, [datePreset]);
 
   return (
     <main className="min-h-screen p-6 space-y-8">
@@ -97,8 +209,9 @@ export default function AdminPage() {
 
       {/* Filter & sort */}
       <section className="rounded-xl border border-white/10 bg-black/20 p-4">
-        <div className="flex flex-wrap items-end gap-3">
-          <div className="flex-1 min-w-56">
+        <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 items-end">
+          {/* textfilter */}
+          <div className="col-span-2">
             <label className="text-xs opacity-70">Filtrera</label>
             <input
               className="w-full rounded-md border border-white/10 bg-neutral-900 p-2"
@@ -107,10 +220,69 @@ export default function AdminPage() {
               onChange={(e) => setFilter(e.target.value)}
             />
           </div>
+
+          {/* status */}
+          <div>
+            <label className="text-xs opacity-70">Status</label>
+            <select
+              className="w-full rounded-md border border-white/10 bg-neutral-900 p-2"
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
+            >
+              <option value="all">Alla</option>
+              <option value="klar">Klar</option>
+              <option value="ongoing">Pågår/Timeout?</option>
+              <option value="notstarted">Inte startad</option>
+            </select>
+          </div>
+
+          {/* datum-preset */}
+          <div>
+            <label className="text-xs opacity-70">Datum</label>
+            <select
+              className="w-full rounded-md border border-white/10 bg-neutral-900 p-2"
+              value={datePreset}
+              onChange={(e) => setDatePreset(e.target.value as DatePreset)}
+            >
+              <option value="all">Alla datum</option>
+              <option value="today">Idag</option>
+              <option value="yesterday">Igår</option>
+              <option value="7d">Senaste 7 dagarna</option>
+              <option value="thisweek">Denna vecka (M–S)</option>
+              <option value="30d">Senaste 30 dagarna</option>
+              <option value="custom">Eget intervall…</option>
+            </select>
+          </div>
+
+          {/* custom range */}
+          <div className="flex gap-2">
+            <div className="flex-1">
+              <label className="text-xs opacity-70">Från</label>
+              <input
+                type="date"
+                disabled={datePreset !== "custom"}
+                className="w-full rounded-md border border-white/10 bg-neutral-900 p-2 disabled:opacity-50"
+                value={rangeStart}
+                onChange={(e) => setRangeStart(e.target.value)}
+              />
+            </div>
+            <div className="flex-1">
+              <label className="text-xs opacity-70">Till</label>
+              <input
+                type="date"
+                disabled={datePreset !== "custom"}
+                className="w-full rounded-md border border-white/10 bg-neutral-900 p-2 disabled:opacity-50"
+                value={rangeEnd}
+                onChange={(e) => setRangeEnd(e.target.value)}
+              />
+            </div>
+          </div>
+
+          {/* sortering */}
           <div>
             <label className="text-xs opacity-70">Sortera på</label>
             <select
-              className="w-40 rounded-md border border-white/10 bg-neutral-900 p-2"
+              className="w-full rounded-md border border-white/10 bg-neutral-900 p-2"
               value={sortKey as string}
               onChange={(e) => setSortKey(e.target.value as keyof TeamRow)}
             >
@@ -126,7 +298,7 @@ export default function AdminPage() {
           <div>
             <label className="text-xs opacity-70">Riktning</label>
             <select
-              className="w-32 rounded-md border border-white/10 bg-neutral-900 p-2"
+              className="w-full rounded-md border border-white/10 bg-neutral-900 p-2"
               value={sortDir}
               onChange={(e) => setSortDir(e.target.value as "asc" | "desc")}
             >
@@ -134,12 +306,27 @@ export default function AdminPage() {
               <option value="asc">Stigande</option>
             </select>
           </div>
-          <button
-            onClick={load}
-            className="ml-auto rounded-md border border-white/10 bg-neutral-900 px-3 py-1.5"
-          >
-            Uppdatera
-          </button>
+
+          <div className="flex gap-2">
+            <button
+              onClick={load}
+              className="flex-1 rounded-md border border-white/10 bg-neutral-900 px-3 py-2"
+            >
+              Uppdatera
+            </button>
+            <button
+              onClick={() => {
+                setFilter("");
+                setDatePreset("all");
+                setRangeStart("");
+                setRangeEnd("");
+                setStatusFilter("all");
+              }}
+              className="flex-1 rounded-md border border-white/10 bg-neutral-900 px-3 py-2"
+            >
+              Rensa filter
+            </button>
+          </div>
         </div>
       </section>
 

@@ -3,36 +3,32 @@ export const runtime = "nodejs";
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { teams, submissions, contentClues } from "@/lib/schema";
-import { and, eq, isNotNull } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 
 export async function GET() {
-  // Teams + felgissningar
+  // Teams
   const teamRows = await db.select().from(teams);
 
-  // wrong guesses per team
+  // Läs submissions och räkna fel (correct = false)
   const subs = await db
     .select({
       teamId: submissions.teamId,
-      isCorrect: submissions.isCorrect,
+      correct: submissions.correct,
     })
     .from(submissions);
 
   const wrongByTeam = new Map<string, number>();
   for (const s of subs) {
-    if (!s.isCorrect) {
+    if (!s.correct) {
       wrongByTeam.set(s.teamId, (wrongByTeam.get(s.teamId) || 0) + 1);
     }
   }
 
+  // Aktiva gåtor
   const activeClues = await db
     .select()
     .from(contentClues)
     .where(eq(contentClues.active, true));
-
-  const byId = (activeClues ?? []).reduce<Record<string, number>>((acc, c) => {
-    acc[c.id] = c.orderIdx ?? 0;
-    return acc;
-  }, {});
 
   const totalClues = activeClues.length;
 
@@ -40,20 +36,20 @@ export async function GET() {
     id: t.id,
     teamName: t.teamName,
     participants: t.participants ?? null,
-    createdAt: t.createdAt?.toISOString?.() ?? null,
-    startedAt: t.startedAt?.toISOString?.() ?? null,
-    completedAt: t.completedAt?.toISOString?.() ?? null,
+    createdAt: (t.createdAt as Date | undefined)?.toISOString?.() ?? null,
+    startedAt: (t.startedAt as Date | null)?.toISOString?.() ?? null,
+    completedAt: (t.completedAt as Date | null)?.toISOString?.() ?? null,
     finalCode: t.finalCode ?? null,
     step: t.step ?? 0,
     totalClues,
     wrongGuesses: wrongByTeam.get(t.id) || 0,
   }));
 
-  // Clues
+  // Alla gåtor (utan antagna fält som inte finns i schemat)
   const clues = await db.select().from(contentClues);
 
-  // Sort by order
-  clues.sort((a, b) => (a.orderIdx ?? 0) - (b.orderIdx ?? 0));
+  // En stabil sort (t.ex. titel) när order-fält saknas
+  clues.sort((a, b) => a.title.localeCompare(b.title));
 
   return NextResponse.json({
     ok: true,
@@ -61,14 +57,14 @@ export async function GET() {
     clues: clues.map((c) => ({
       id: c.id,
       title: c.title,
-      icon: c.icon ?? null,
+      icon: (c as any).icon ?? null,
       riddle: c.riddle,
-      type: c.type,
-      expectedDigit: c.expectedDigit ?? null,
-      expectedCode: c.expectedCode ?? null,
-      durationSec: c.durationSec ?? null,
+      expectedDigit: (c as any).expectedDigit ?? null,
+      verification: (c as any).verification ?? null,
+      locationHint: (c as any).locationHint ?? null,
+      safetyHint: (c as any).safetyHint ?? null,
+      notes: (c as any).notes ?? null,
       active: c.active,
-      orderIdx: c.orderIdx ?? 0,
     })),
   });
 }

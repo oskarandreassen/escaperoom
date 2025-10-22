@@ -12,7 +12,7 @@ type TeamRow = {
   step?: number | null;
   totalClues?: number | null;
   finalCode?: string | null;
-  wrongGuesses: number; // aggregerat
+  wrongGuesses: number;
 };
 
 type ClueRow = {
@@ -20,12 +20,14 @@ type ClueRow = {
   title: string;
   icon?: string | null;
   riddle: string;
-  type: "digit" | "code";
+  // Din schema har inte "type"—vi härleder typ i UI:
+  // digit om expectedDigit finns, annars code om verification finns.
   expectedDigit?: number | null;
-  expectedCode?: string | null;
-  durationSec?: number | null;
+  verification?: string | null; // används som "förväntad kod"
+  locationHint?: string | null;
+  safetyHint?: string | null;
+  notes?: string | null;
   active: boolean;
-  orderIdx: number;
 };
 
 type OverviewResp = {
@@ -43,7 +45,7 @@ export default function AdminPage() {
 
   async function load() {
     const res = await fetch("/api/admin/overview", { cache: "no-store" });
-    const json = await res.json();
+    const json = (await res.json()) as OverviewResp;
     if (json?.ok) setData(json);
   }
 
@@ -61,8 +63,8 @@ export default function AdminPage() {
       );
     }
     arr = [...arr].sort((a, b) => {
-      const A = a[sortKey] ?? "";
-      const B = b[sortKey] ?? "";
+      const A = (a[sortKey] ?? "") as any;
+      const B = (b[sortKey] ?? "") as any;
       if (A < B) return sortDir === "asc" ? -1 : 1;
       if (A > B) return sortDir === "asc" ? 1 : -1;
       return 0;
@@ -77,6 +79,7 @@ export default function AdminPage() {
   async function createTeam(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const fd = new FormData(e.currentTarget);
+    // Undvik fd.entries() för TS-kompat:
     const teamName = String(fd.get("teamName") || "");
     const participants = String(fd.get("participants") || "");
     const res = await fetch("/api/admin/teams", {
@@ -85,7 +88,7 @@ export default function AdminPage() {
       body: JSON.stringify({ teamName, participants }),
     });
     if (res.ok) {
-      e.currentTarget.reset();
+      (e.currentTarget as HTMLFormElement).reset();
       load();
     } else {
       alert("Kunde inte skapa lag.");
@@ -101,12 +104,18 @@ export default function AdminPage() {
   async function upsertClue(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const fd = new FormData(e.currentTarget);
-    const body = Object.fromEntries(fd.entries());
-    // normalisera
-    (body as any).durationSec = Number(body.durationSec || 300);
-    (body as any).orderIdx = Number(body.orderIdx || 0);
-    (body as any).active = (body.active as string) === "on";
-    // välj metod
+    // Bygg body manuellt (ingen .entries()):
+    const body: Record<string, any> = {};
+    fd.forEach((v, k) => {
+      body[k] = v;
+    });
+    // boolean
+    if (body.active !== undefined) body.active = body.active === "on";
+    // number
+    if (body.expectedDigit !== undefined && body.expectedDigit !== "")
+      body.expectedDigit = Number(body.expectedDigit);
+    else if (body.expectedDigit === "") body.expectedDigit = null;
+
     const method = body.id ? "PATCH" : "POST";
     const res = await fetch("/api/admin/clues", {
       method,
@@ -117,7 +126,8 @@ export default function AdminPage() {
       (e.currentTarget as HTMLFormElement).reset();
       load();
     } else {
-      alert("Kunde inte spara gåtan.");
+      const j = await res.json().catch(() => null);
+      alert(j?.error || "Kunde inte spara gåtan.");
     }
   }
 
@@ -323,107 +333,113 @@ export default function AdminPage() {
         </div>
 
         <div className="grid gap-4">
-          {data?.clues.map((c) => (
-            <form key={c.id} onSubmit={upsertClue} className="rounded-lg border border-white/10 p-3">
-              <input type="hidden" name="id" defaultValue={c.id} />
-              <div className="grid gap-2 md:grid-cols-6">
-                <div className="md:col-span-2">
-                  <label className="text-xs opacity-70">Titel</label>
-                  <input
-                    name="title"
-                    defaultValue={c.title}
-                    className="w-full rounded-md border border-white/10 bg-neutral-900 p-2"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs opacity-70">Ikon</label>
-                  <input
-                    name="icon"
-                    defaultValue={c.icon || ""}
-                    className="w-full rounded-md border border-white/10 bg-neutral-900 p-2"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs opacity-70">Typ</label>
-                  <select
-                    name="type"
-                    defaultValue={c.type}
-                    className="w-full rounded-md border border-white/10 bg-neutral-900 p-2"
-                  >
-                    <option value="digit">Siffra (0–9)</option>
-                    <option value="code">Kod (flera siffror)</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="text-xs opacity-70">Duration (sek)</label>
-                  <input
-                    name="durationSec"
-                    type="number"
-                    min={30}
-                    step={30}
-                    defaultValue={c.durationSec ?? 300}
-                    className="w-full rounded-md border border-white/10 bg-neutral-900 p-2"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs opacity-70">Order</label>
-                  <input
-                    name="orderIdx"
-                    type="number"
-                    step={1}
-                    defaultValue={c.orderIdx}
-                    className="w-full rounded-md border border-white/10 bg-neutral-900 p-2"
-                  />
-                </div>
-                <div className="md:col-span-6">
-                  <label className="text-xs opacity-70">Gåta</label>
-                  <textarea
-                    name="riddle"
-                    defaultValue={c.riddle}
-                    rows={3}
-                    className="w-full rounded-md border border-white/10 bg-neutral-900 p-2"
-                  />
-                </div>
-                {c.type === "digit" ? (
+          {data?.clues.map((c) => {
+            const inferredType: "digit" | "code" =
+              c.verification && c.verification.trim().length > 0 ? "code" : "digit";
+            return (
+              <form key={c.id} onSubmit={upsertClue} className="rounded-lg border border-white/10 p-3">
+                <input type="hidden" name="id" defaultValue={c.id} />
+                <div className="grid gap-2 md:grid-cols-6">
+                  <div className="md:col-span-2">
+                    <label className="text-xs opacity-70">Titel</label>
+                    <input
+                      name="title"
+                      defaultValue={c.title}
+                      className="w-full rounded-md border border-white/10 bg-neutral-900 p-2"
+                    />
+                  </div>
                   <div>
-                    <label className="text-xs opacity-70">Förväntad siffra</label>
+                    <label className="text-xs opacity-70">Ikon</label>
+                    <input
+                      name="icon"
+                      defaultValue={c.icon || ""}
+                      className="w-full rounded-md border border-white/10 bg-neutral-900 p-2"
+                    />
+                  </div>
+                  {/* Typ visas bara som hint i UI, styrs av vilka fält man fyller i */}
+                  <div>
+                    <label className="text-xs opacity-70">Typ</label>
+                    <input
+                      readOnly
+                      value={inferredType === "code" ? "Kod" : "Siffra"}
+                      className="w-full rounded-md border border-white/10 bg-neutral-900 p-2 opacity-60"
+                    />
+                  </div>
+                  <div className="md:col-span-3">
+                    <label className="text-xs opacity-70">Gåta</label>
+                    <textarea
+                      name="riddle"
+                      defaultValue={c.riddle}
+                      rows={2}
+                      className="w-full rounded-md border border-white/10 bg-neutral-900 p-2"
+                    />
+                  </div>
+
+                  {/* Digit/code fält */}
+                  <div>
+                    <label className="text-xs opacity-70">Förv. siffra (0–9)</label>
                     <input
                       name="expectedDigit"
                       type="number"
                       min={0}
                       max={9}
-                      defaultValue={c.expectedDigit ?? 0}
+                      defaultValue={c.expectedDigit ?? ""}
                       className="w-full rounded-md border border-white/10 bg-neutral-900 p-2"
                     />
                   </div>
-                ) : (
                   <div>
-                    <label className="text-xs opacity-70">Förväntad kod</label>
+                    <label className="text-xs opacity-70">Förv. kod (verification)</label>
                     <input
-                      name="expectedCode"
-                      pattern="^[0-9]+$"
-                      defaultValue={c.expectedCode || ""}
+                      name="verification"
+                      defaultValue={c.verification || ""}
                       className="w-full rounded-md border border-white/10 bg-neutral-900 p-2"
                     />
                   </div>
-                )}
-                <label className="flex items-center gap-2">
-                  <input type="checkbox" name="active" defaultChecked={c.active} />
-                  <span>Aktiv</span>
-                </label>
-              </div>
-              <div className="mt-3 flex items-center gap-2">
-                <button className="rounded-md bg-purple-600 px-4 py-1.5 font-semibold">Spara</button>
-                <button
-                  type="button"
-                  onClick={() => deleteClue(c.id)}
-                  className="rounded-md border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-red-300"
-                >
-                  Ta bort
-                </button>
-              </div>
-            </form>
-          ))}
+
+                  {/* Hjälpfält enligt ditt schema */}
+                  <div className="md:col-span-2">
+                    <label className="text-xs opacity-70">Plats-hint</label>
+                    <input
+                      name="locationHint"
+                      defaultValue={c.locationHint || ""}
+                      className="w-full rounded-md border border-white/10 bg-neutral-900 p-2"
+                    />
+                  </div>
+                  <div className="md:col-span-2">
+                    <label className="text-xs opacity-70">Säkerhetshjälp</label>
+                    <input
+                      name="safetyHint"
+                      defaultValue={c.safetyHint || ""}
+                      className="w-full rounded-md border border-white/10 bg-neutral-900 p-2"
+                    />
+                  </div>
+                  <div className="md:col-span-2">
+                    <label className="text-xs opacity-70">Anteckningar</label>
+                    <input
+                      name="notes"
+                      defaultValue={c.notes || ""}
+                      className="w-full rounded-md border border-white/10 bg-neutral-900 p-2"
+                    />
+                  </div>
+
+                  <label className="flex items-center gap-2">
+                    <input type="checkbox" name="active" defaultChecked={c.active} />
+                    <span>Aktiv</span>
+                  </label>
+                </div>
+                <div className="mt-3 flex items-center gap-2">
+                  <button className="rounded-md bg-purple-600 px-4 py-1.5 font-semibold">Spara</button>
+                  <button
+                    type="button"
+                    onClick={() => deleteClue(c.id)}
+                    className="rounded-md border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-red-300"
+                  >
+                    Ta bort
+                  </button>
+                </div>
+              </form>
+            );
+          })}
 
           {/* Ny gåta */}
           <form onSubmit={upsertClue} className="rounded-lg border border-dashed border-white/20 p-3">
@@ -441,49 +457,18 @@ export default function AdminPage() {
                 <label className="text-xs opacity-70">Ikon</label>
                 <input name="icon" className="w-full rounded-md border border-white/10 bg-neutral-900 p-2" />
               </div>
-              <div>
-                <label className="text-xs opacity-70">Typ</label>
-                <select
-                  name="type"
-                  className="w-full rounded-md border border-white/10 bg-neutral-900 p-2"
-                >
-                  <option value="digit">Siffra (0–9)</option>
-                  <option value="code">Kod (flera siffror)</option>
-                </select>
-              </div>
-              <div>
-                <label className="text-xs opacity-70">Duration (sek)</label>
-                <input
-                  name="durationSec"
-                  type="number"
-                  min={30}
-                  step={30}
-                  defaultValue={300}
-                  className="w-full rounded-md border border-white/10 bg-neutral-900 p-2"
-                />
-              </div>
-              <div>
-                <label className="text-xs opacity-70">Order</label>
-                <input
-                  name="orderIdx"
-                  type="number"
-                  step={1}
-                  defaultValue={0}
-                  className="w-full rounded-md border border-white/10 bg-neutral-900 p-2"
-                />
-              </div>
-              <div className="md:col-span-6">
+              <div className="md:col-span-3">
                 <label className="text-xs opacity-70">Gåta</label>
                 <textarea
                   name="riddle"
                   required
-                  rows={3}
+                  rows={2}
                   className="w-full rounded-md border border-white/10 bg-neutral-900 p-2"
                 />
               </div>
-              {/* Både digit/code visas; backend ignorerar fel fält */}
+
               <div>
-                <label className="text-xs opacity-70">Förväntad siffra</label>
+                <label className="text-xs opacity-70">Förv. siffra (0–9)</label>
                 <input
                   name="expectedDigit"
                   type="number"
@@ -493,13 +478,26 @@ export default function AdminPage() {
                 />
               </div>
               <div>
-                <label className="text-xs opacity-70">Förväntad kod</label>
+                <label className="text-xs opacity-70">Förv. kod (verification)</label>
                 <input
-                  name="expectedCode"
-                  pattern="^[0-9]+$"
+                  name="verification"
                   className="w-full rounded-md border border-white/10 bg-neutral-900 p-2"
                 />
               </div>
+
+              <div className="md:col-span-2">
+                <label className="text-xs opacity-70">Plats-hint</label>
+                <input name="locationHint" className="w-full rounded-md border border-white/10 bg-neutral-900 p-2" />
+              </div>
+              <div className="md:col-span-2">
+                <label className="text-xs opacity-70">Säkerhetshjälp</label>
+                <input name="safetyHint" className="w-full rounded-md border border-white/10 bg-neutral-900 p-2" />
+              </div>
+              <div className="md:col-span-2">
+                <label className="text-xs opacity-70">Anteckningar</label>
+                <input name="notes" className="w-full rounded-md border border-white/10 bg-neutral-900 p-2" />
+              </div>
+
               <label className="flex items-center gap-2">
                 <input type="checkbox" name="active" defaultChecked />
                 <span>Aktiv</span>

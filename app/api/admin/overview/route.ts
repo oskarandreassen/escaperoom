@@ -3,69 +3,69 @@ export const runtime = "nodejs";
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { teams, submissions, contentClues } from "@/lib/schema";
-import { eq } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 
 export async function GET() {
   try {
-    // Teams
+    // Hämta alla lag
     const teamRows = await db.select().from(teams);
 
-    // Felgissningar
-    const subs = await db
+    // Felgissningar per lag (correct = false)
+    const allSubs = await db
       .select({
+        id: submissions.id,
         teamId: submissions.teamId,
         correct: submissions.correct,
+        submittedAt: submissions.submittedAt,
+        timeLeftAtSubmit: submissions.timeLeftAtSubmit,
       })
       .from(submissions);
 
     const wrongByTeam = new Map<string, number>();
-    for (const s of subs) {
+    const lastCorrectByTeam = new Map<string, { submittedAt: Date; timeLeftAtSubmit: number | null }>();
+
+    for (const s of allSubs) {
       if (!s.correct) {
         wrongByTeam.set(s.teamId, (wrongByTeam.get(s.teamId) || 0) + 1);
+      } else {
+        const prev = lastCorrectByTeam.get(s.teamId);
+        if (!prev || (s.submittedAt as Date) > prev.submittedAt) {
+          lastCorrectByTeam.set(s.teamId, {
+            submittedAt: s.submittedAt as Date,
+            timeLeftAtSubmit: (s.timeLeftAtSubmit as number | null) ?? null,
+          });
+        }
       }
     }
 
-    // Aktiva gåtor
+    // Antal aktiva gåtor för referens
     const activeClues = await db
       .select()
       .from(contentClues)
       .where(eq(contentClues.active, true));
-
     const totalClues = activeClues.length;
 
-    const teamsOut = teamRows.map((t) => ({
-      id: t.id,
-      teamName: t.teamName,
-      participants: t.participants ?? null,
-      createdAt: (t.createdAt as Date | undefined)?.toISOString?.() ?? null,
-      startedAt: (t.startedAt as Date | null)?.toISOString?.() ?? null,
-      completedAt: (t.completedAt as Date | null)?.toISOString?.() ?? null,
-      finalCode: t.finalCode ?? null,
-      step: t.step ?? 0,
-      totalClues,
-      wrongGuesses: wrongByTeam.get(t.id) || 0,
-    }));
-
-    // Alla gåtor (utan antagna fält)
-    const clues = await db.select().from(contentClues);
-    clues.sort((a, b) => a.title.localeCompare(b.title));
-
-    return NextResponse.json({
-      ok: true,
-      teams: teamsOut,
-      clues: clues.map((c) => ({
-        id: c.id,
-        title: c.title,
-        icon: (c as any).icon ?? null,
-        riddle: c.riddle,
-        expectedDigit: (c as any).expectedDigit ?? null,
-        verification: (c as any).verification ?? null,
-        locationHint: (c as any).locationHint ?? null,
-        safetyHint: (c as any).safetyHint ?? null,
-        notes: (c as any).notes ?? null,
-        active: c.active,
-      })),
+    const teamsOut = teamRows.map((t) => {
+      const last = lastCorrectByTeam.get(t.id);
+      return {
+        id: t.id,
+        teamName: t.teamName,
+        participants: t.participants ?? null,
+        createdAt: (t.createdAt as Date | undefined)?.toISOString?.() ?? null,
+        startedAt: (t.startedAt as Date | null)?.toISOString?.() ?? null,
+        completedAt: (t.completedAt as Date | null)?.toISOString?.() ?? null,
+        finalCode: t.finalCode ?? null,
+        step: t.step ?? 0,
+        totalClues,
+        wrongGuesses: wrongByTeam.get(t.id) || 0,
+        timeLeftAtFinishSec: t.completedAt ? (last?.timeLeftAtSubmit ?? 0) : null,
+      };
     });
+
+    // Sortera stabilt (t.ex. på createdAt fallande)
+    teamsOut.sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""));
+
+    return NextResponse.json({ ok: true, teams: teamsOut });
   } catch (err: any) {
     console.error("overview GET failed:", err?.message || err);
     return NextResponse.json(

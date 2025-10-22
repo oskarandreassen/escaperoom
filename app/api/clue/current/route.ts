@@ -1,11 +1,17 @@
 export const runtime = "nodejs";
 
 import { NextResponse } from "next/server";
-import { asc, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { teams, contentClues } from "@/lib/schema";
+import { teams } from "@/lib/schema";
 
 const DEFAULT_CLUE_SECONDS = 5 * 60;
+
+// Robust laddning av data/clues.ts oavsett exportformat
+async function getClues(): Promise<any[]> {
+  const mod: any = await import("../../../../data/clues");
+  return mod?.CLUES ?? mod?.default ?? mod?.clues ?? [];
+}
 
 export async function GET(req: Request) {
   const url = new URL(req.url);
@@ -15,13 +21,9 @@ export async function GET(req: Request) {
   const [team] = await db.select().from(teams).where(eq(teams.id, teamId));
   if (!team) return NextResponse.json({ ok: false, error: "Team not found" }, { status: 404 });
 
-  // Hämta aktiva gåtor – ingen orderIdx i ditt schema, sortera t.ex. på title
-  const clues = await db
-    .select()
-    .from(contentClues)
-    .where(eq(contentClues.active, true))
-    .orderBy(asc(contentClues.title));
-
+  const ALL = (await getClues()) as any[];
+  // använd bara aktiva, i samma ordning som i filen
+  const clues = ALL.filter((c) => !!c.active);
   const total = clues.length;
   const step = Math.max(0, Math.min(Number(team.step ?? 0), Math.max(total - 1, 0)));
 
@@ -59,27 +61,26 @@ export async function GET(req: Request) {
     });
   }
 
-  // Deadline: per-stegets standardtid + ack. straff (penaltiesSec)
+  // Timer: startedAt + standardtid + ack. straff (penaltiesSec)
   const startedAtMs = (team.startedAt as Date | null)?.getTime() ?? Date.now();
   const penalties = Number((team.penaltiesSec as number | null) ?? 0);
   const deadline = new Date(startedAtMs + (DEFAULT_CLUE_SECONDS + penalties) * 1000);
   const now = new Date();
   const timeLeftSec = Math.max(0, Math.floor((deadline.getTime() - now.getTime()) / 1000));
 
-  // Härled "type" för klienten (endast för visning)
-  const inferredType = (current as any).verification && String((current as any).verification).length > 0
-    ? "code"
-    : "digit";
+  // härled typ från din clues.ts: verification => code, annars digit
+  const inferredType =
+    current?.verification && String(current.verification).length > 0 ? "code" : "digit";
 
   return NextResponse.json({
     ok: true,
     finished: false,
     team: { id: team.id, step, total },
     clue: {
-      id: current.id,
-      title: current.title,
-      icon: (current as any).icon ?? "",
-      riddle: current.riddle,
+      id: current?.id ?? String(step),
+      title: current?.title ?? "",
+      icon: current?.icon ?? "",
+      riddle: current?.riddle ?? "",
       type: inferredType,
     },
     deadline: deadline.toISOString(),

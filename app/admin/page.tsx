@@ -11,29 +11,13 @@ type TeamRow = {
   completedAt?: string | null;
   step?: number | null;
   totalClues?: number | null;
-  finalCode?: string | null;
   wrongGuesses: number;
-};
-
-type ClueRow = {
-  id: string;
-  title: string;
-  icon?: string | null;
-  riddle: string;
-  // Din schema har inte "type"—vi härleder typ i UI:
-  // digit om expectedDigit finns, annars code om verification finns.
-  expectedDigit?: number | null;
-  verification?: string | null; // används som "förväntad kod"
-  locationHint?: string | null;
-  safetyHint?: string | null;
-  notes?: string | null;
-  active: boolean;
+  timeLeftAtFinishSec?: number | null; // NYTT: hur mycket tid kvar när de klarade
 };
 
 type OverviewResp = {
   ok: true;
   teams: TeamRow[];
-  clues: ClueRow[];
 };
 
 export default function AdminPage() {
@@ -47,9 +31,9 @@ export default function AdminPage() {
     try {
       const res = await fetch("/api/admin/overview", { cache: "no-store" });
       if (!res.ok) {
-        const raw = await res.text().catch(() => "");
-        console.error("overview error:", raw);
-        return; // visa tyst fel i UI, behåll nuvarande data
+        // visa inte fel-popup—logga bara
+        console.error("overview error:", await res.text().catch(() => ""));
+        return;
       }
       const json = (await res.json()) as OverviewResp;
       if (json?.ok) setData(json);
@@ -57,7 +41,6 @@ export default function AdminPage() {
       console.error("overview fetch failed:", e);
     }
   }
-
 
   useEffect(() => {
     load();
@@ -86,65 +69,13 @@ export default function AdminPage() {
     setExpanded((p) => ({ ...p, [id]: !p[id] }));
   }
 
-  async function createTeam(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    const fd = new FormData(e.currentTarget);
-    // Undvik fd.entries() för TS-kompat:
-    const teamName = String(fd.get("teamName") || "");
-    const participants = String(fd.get("participants") || "");
-    const res = await fetch("/api/admin/teams", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ teamName, participants }),
-    });
-    if (res.ok) {
-      (e.currentTarget as HTMLFormElement).reset();
-      load();
-    } else {
-      alert("Kunde inte skapa lag.");
-    }
-  }
-
-  async function deleteTeam(id: string) {
-    if (!confirm("Ta bort det här laget?")) return;
-    const res = await fetch(`/api/admin/teams?id=${encodeURIComponent(id)}`, { method: "DELETE" });
-    if (res.ok) load();
-  }
-
-  async function upsertClue(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    const fd = new FormData(e.currentTarget);
-    // Bygg body manuellt (ingen .entries()):
-    const body: Record<string, any> = {};
-    fd.forEach((v, k) => {
-      body[k] = v;
-    });
-    // boolean
-    if (body.active !== undefined) body.active = body.active === "on";
-    // number
-    if (body.expectedDigit !== undefined && body.expectedDigit !== "")
-      body.expectedDigit = Number(body.expectedDigit);
-    else if (body.expectedDigit === "") body.expectedDigit = null;
-
-    const method = body.id ? "PATCH" : "POST";
-    const res = await fetch("/api/admin/clues", {
-      method,
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    if (res.ok) {
-      (e.currentTarget as HTMLFormElement).reset();
-      load();
-    } else {
-      const j = await res.json().catch(() => null);
-      alert(j?.error || "Kunde inte spara gåtan.");
-    }
-  }
-
-  async function deleteClue(id: string) {
-    if (!confirm("Ta bort denna gåta?")) return;
-    const res = await fetch(`/api/admin/clues?id=${encodeURIComponent(id)}`, { method: "DELETE" });
-    if (res.ok) load();
+  function fmtSecs(secs?: number | null) {
+    if (secs == null) return "—";
+    const s = Math.max(0, Math.floor(secs));
+    const m = Math.floor(s / 60);
+    const r = s % 60;
+    return `${m}m ${String(r).padStart(2, "0")}s`;
+    // vill du ha 0m 00s exakt: funkar redan så
   }
 
   return (
@@ -188,6 +119,7 @@ export default function AdminPage() {
               <option value="teamName">Gruppnamn</option>
               <option value="wrongGuesses">Felgissningar</option>
               <option value="step">Steg</option>
+              <option value="timeLeftAtFinishSec">Tid kvar när klar</option>
             </select>
           </div>
           <div>
@@ -201,21 +133,18 @@ export default function AdminPage() {
               <option value="asc">Stigande</option>
             </select>
           </div>
-        </div>
-      </section>
-
-      {/* Teams */}
-      <section className="rounded-xl border border-white/10 bg-black/20 p-4">
-        <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-lg font-semibold">Grupper</h2>
           <button
             onClick={load}
-            className="rounded-md border border-white/10 bg-neutral-900 px-3 py-1.5"
+            className="ml-auto rounded-md border border-white/10 bg-neutral-900 px-3 py-1.5"
           >
             Uppdatera
           </button>
         </div>
+      </section>
 
+      {/* Teams (read-only) */}
+      <section className="rounded-xl border border-white/10 bg-black/20 p-4">
+        <h2 className="mb-3 text-lg font-semibold">Grupper</h2>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="text-left opacity-70">
@@ -223,20 +152,19 @@ export default function AdminPage() {
                 <th className="py-2">Grupp</th>
                 <th>Spelare</th>
                 <th>Start</th>
-                <th>Slut</th>
+                <th>Tid kvar när klar</th>
                 <th>Steg</th>
                 <th>Felgissn.</th>
                 <th>Resultat</th>
-                <th></th>
               </tr>
             </thead>
             <tbody>
               {filteredTeams.map((t) => {
-                const playersCount =
-                  (t.participants || "")
-                    .split(/[,\n]/)
-                    .map((s) => s.trim())
-                    .filter(Boolean).length || 0;
+                const members = (t.participants || "")
+                  .split(/[,\n]/)
+                  .map((s) => s.trim())
+                  .filter(Boolean);
+                const playersCount = members.length || 0;
 
                 const result =
                   t.completedAt
@@ -246,7 +174,7 @@ export default function AdminPage() {
                     : "Inte startad";
 
                 return (
-                  <tr key={t.id} className="border-t border-white/5">
+                  <tr key={t.id} className="border-top border-white/5">
                     <td className="py-2">
                       <button
                         className="underline decoration-dotted"
@@ -258,20 +186,14 @@ export default function AdminPage() {
                     </td>
                     <td>{playersCount}</td>
                     <td>{t.startedAt ? new Date(t.startedAt).toLocaleString() : "—"}</td>
-                    <td>{t.completedAt ? new Date(t.completedAt).toLocaleString() : "—"}</td>
+                    <td>
+                      {t.completedAt ? fmtSecs(t.timeLeftAtFinishSec) : "—"}
+                    </td>
                     <td>
                       {t.step ?? 0}/{t.totalClues ?? "?"}
                     </td>
                     <td>{t.wrongGuesses}</td>
                     <td>{result}</td>
-                    <td className="text-right">
-                      <button
-                        onClick={() => deleteTeam(t.id)}
-                        className="rounded-md border border-red-500/30 bg-red-500/10 px-2 py-1 text-red-300"
-                      >
-                        Ta bort
-                      </button>
-                    </td>
                   </tr>
                 );
               })}
@@ -279,7 +201,7 @@ export default function AdminPage() {
           </table>
         </div>
 
-        {/* Expanders */}
+        {/* Expanders med deltagare */}
         <div className="mt-3 space-y-3">
           {filteredTeams
             .filter((t) => expanded[t.id])
@@ -305,218 +227,6 @@ export default function AdminPage() {
                 </div>
               );
             })}
-        </div>
-
-        {/* Create team */}
-        <div className="mt-6 rounded-lg border border-white/10 p-4">
-          <h3 className="mb-2 font-semibold">Skapa ny grupp</h3>
-          <form onSubmit={createTeam} className="grid gap-2 md:grid-cols-2">
-            <input
-              required
-              name="teamName"
-              placeholder="Gruppnamn"
-              className="rounded-md border border-white/10 bg-neutral-900 p-2"
-            />
-            <textarea
-              name="participants"
-              placeholder="Spelare (komma- eller rad-separerade)"
-              className="rounded-md border border-white/10 bg-neutral-900 p-2 md:col-span-2"
-              rows={3}
-            />
-            <button className="rounded-md bg-purple-600 px-4 py-2 font-semibold md:col-span-2">
-              Skapa
-            </button>
-          </form>
-        </div>
-      </section>
-
-      {/* Clues */}
-      <section className="rounded-xl border border-white/10 bg-black/20 p-4">
-        <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-lg font-semibold">Gåtor</h2>
-          <button
-            onClick={load}
-            className="rounded-md border border-white/10 bg-neutral-900 px-3 py-1.5"
-          >
-            Uppdatera
-          </button>
-        </div>
-
-        <div className="grid gap-4">
-          {data?.clues.map((c) => {
-            const inferredType: "digit" | "code" =
-              c.verification && c.verification.trim().length > 0 ? "code" : "digit";
-            return (
-              <form key={c.id} onSubmit={upsertClue} className="rounded-lg border border-white/10 p-3">
-                <input type="hidden" name="id" defaultValue={c.id} />
-                <div className="grid gap-2 md:grid-cols-6">
-                  <div className="md:col-span-2">
-                    <label className="text-xs opacity-70">Titel</label>
-                    <input
-                      name="title"
-                      defaultValue={c.title}
-                      className="w-full rounded-md border border-white/10 bg-neutral-900 p-2"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-xs opacity-70">Ikon</label>
-                    <input
-                      name="icon"
-                      defaultValue={c.icon || ""}
-                      className="w-full rounded-md border border-white/10 bg-neutral-900 p-2"
-                    />
-                  </div>
-                  {/* Typ visas bara som hint i UI, styrs av vilka fält man fyller i */}
-                  <div>
-                    <label className="text-xs opacity-70">Typ</label>
-                    <input
-                      readOnly
-                      value={inferredType === "code" ? "Kod" : "Siffra"}
-                      className="w-full rounded-md border border-white/10 bg-neutral-900 p-2 opacity-60"
-                    />
-                  </div>
-                  <div className="md:col-span-3">
-                    <label className="text-xs opacity-70">Gåta</label>
-                    <textarea
-                      name="riddle"
-                      defaultValue={c.riddle}
-                      rows={2}
-                      className="w-full rounded-md border border-white/10 bg-neutral-900 p-2"
-                    />
-                  </div>
-
-                  {/* Digit/code fält */}
-                  <div>
-                    <label className="text-xs opacity-70">Förv. siffra (0–9)</label>
-                    <input
-                      name="expectedDigit"
-                      type="number"
-                      min={0}
-                      max={9}
-                      defaultValue={c.expectedDigit ?? ""}
-                      className="w-full rounded-md border border-white/10 bg-neutral-900 p-2"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-xs opacity-70">Förv. kod (verification)</label>
-                    <input
-                      name="verification"
-                      defaultValue={c.verification || ""}
-                      className="w-full rounded-md border border-white/10 bg-neutral-900 p-2"
-                    />
-                  </div>
-
-                  {/* Hjälpfält enligt ditt schema */}
-                  <div className="md:col-span-2">
-                    <label className="text-xs opacity-70">Plats-hint</label>
-                    <input
-                      name="locationHint"
-                      defaultValue={c.locationHint || ""}
-                      className="w-full rounded-md border border-white/10 bg-neutral-900 p-2"
-                    />
-                  </div>
-                  <div className="md:col-span-2">
-                    <label className="text-xs opacity-70">Säkerhetshjälp</label>
-                    <input
-                      name="safetyHint"
-                      defaultValue={c.safetyHint || ""}
-                      className="w-full rounded-md border border-white/10 bg-neutral-900 p-2"
-                    />
-                  </div>
-                  <div className="md:col-span-2">
-                    <label className="text-xs opacity-70">Anteckningar</label>
-                    <input
-                      name="notes"
-                      defaultValue={c.notes || ""}
-                      className="w-full rounded-md border border-white/10 bg-neutral-900 p-2"
-                    />
-                  </div>
-
-                  <label className="flex items-center gap-2">
-                    <input type="checkbox" name="active" defaultChecked={c.active} />
-                    <span>Aktiv</span>
-                  </label>
-                </div>
-                <div className="mt-3 flex items-center gap-2">
-                  <button className="rounded-md bg-purple-600 px-4 py-1.5 font-semibold">Spara</button>
-                  <button
-                    type="button"
-                    onClick={() => deleteClue(c.id)}
-                    className="rounded-md border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-red-300"
-                  >
-                    Ta bort
-                  </button>
-                </div>
-              </form>
-            );
-          })}
-
-          {/* Ny gåta */}
-          <form onSubmit={upsertClue} className="rounded-lg border border-dashed border-white/20 p-3">
-            <div className="mb-2 font-semibold opacity-80">Lägg till gåta</div>
-            <div className="grid gap-2 md:grid-cols-6">
-              <div className="md:col-span-2">
-                <label className="text-xs opacity-70">Titel</label>
-                <input
-                  name="title"
-                  required
-                  className="w-full rounded-md border border-white/10 bg-neutral-900 p-2"
-                />
-              </div>
-              <div>
-                <label className="text-xs opacity-70">Ikon</label>
-                <input name="icon" className="w-full rounded-md border border-white/10 bg-neutral-900 p-2" />
-              </div>
-              <div className="md:col-span-3">
-                <label className="text-xs opacity-70">Gåta</label>
-                <textarea
-                  name="riddle"
-                  required
-                  rows={2}
-                  className="w-full rounded-md border border-white/10 bg-neutral-900 p-2"
-                />
-              </div>
-
-              <div>
-                <label className="text-xs opacity-70">Förv. siffra (0–9)</label>
-                <input
-                  name="expectedDigit"
-                  type="number"
-                  min={0}
-                  max={9}
-                  className="w-full rounded-md border border-white/10 bg-neutral-900 p-2"
-                />
-              </div>
-              <div>
-                <label className="text-xs opacity-70">Förv. kod (verification)</label>
-                <input
-                  name="verification"
-                  className="w-full rounded-md border border-white/10 bg-neutral-900 p-2"
-                />
-              </div>
-
-              <div className="md:col-span-2">
-                <label className="text-xs opacity-70">Plats-hint</label>
-                <input name="locationHint" className="w-full rounded-md border border-white/10 bg-neutral-900 p-2" />
-              </div>
-              <div className="md:col-span-2">
-                <label className="text-xs opacity-70">Säkerhetshjälp</label>
-                <input name="safetyHint" className="w-full rounded-md border border-white/10 bg-neutral-900 p-2" />
-              </div>
-              <div className="md:col-span-2">
-                <label className="text-xs opacity-70">Anteckningar</label>
-                <input name="notes" className="w-full rounded-md border border-white/10 bg-neutral-900 p-2" />
-              </div>
-
-              <label className="flex items-center gap-2">
-                <input type="checkbox" name="active" defaultChecked />
-                <span>Aktiv</span>
-              </label>
-            </div>
-            <div className="mt-3">
-              <button className="rounded-md bg-purple-600 px-4 py-1.5 font-semibold">Lägg till</button>
-            </div>
-          </form>
         </div>
       </section>
     </main>

@@ -1,13 +1,19 @@
 export const runtime = "nodejs";
 
 import { NextResponse } from "next/server";
-import { eq, asc } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { teams, submissions, contentClues } from "@/lib/schema";
+import { teams, submissions } from "@/lib/schema";
 
 const WRONG_PENALTY_SEC = 30;
 const COOLDOWN_MS = 3000;
 const DEFAULT_CLUE_SECONDS = 5 * 60;
+
+// Robust laddning av data/clues.ts oavsett exportformat
+async function getClues(): Promise<any[]> {
+  const mod: any = await import("../../../../data/clues");
+  return mod?.CLUES ?? mod?.default ?? mod?.clues ?? [];
+}
 
 export async function POST(req: Request) {
   try {
@@ -22,47 +28,38 @@ export async function POST(req: Request) {
     const [team] = await db.select().from(teams).where(eq(teams.id, teamId));
     if (!team) return NextResponse.json({ ok: false, error: "Team not found" }, { status: 404 });
 
-    // Aktiva gåtor, sorterade t.ex. på title
-    const all = await db
-      .select()
-      .from(contentClues)
-      .where(eq(contentClues.active, true))
-      .orderBy(asc(contentClues.title));
-
+    const all = (await getClues()).filter((c) => !!c.active) as any[];
     const total = all.length;
     const step = Math.max(0, Math.min(Number(team.step ?? 0), Math.max(total - 1, 0)));
     const current = all[step];
-
     if (!current) {
       return NextResponse.json({ ok: false, error: "No current clue" }, { status: 400 });
     }
 
-    const expectedDigit = (current as any).expectedDigit ?? null;
-    const expectedCode = ((current as any).verification as string | null) ?? null;
+    const expectedDigit = current?.expectedDigit ?? null;
+    const expectedCode = (current?.verification as string | null) ?? null;
 
-    const normalized = typeof rawAnswer === "number" ? String(rawAnswer) : String(rawAnswer || "").trim();
+    const normalized =
+      typeof rawAnswer === "number" ? String(rawAnswer) : String(rawAnswer || "").trim();
     const isDigitAttempt = /^\d+$/.test(normalized);
 
-    // Bestäm korrekthet:
     let isCorrect = false;
     if (expectedCode && expectedCode.length > 0) {
-      // "code"-typ via verification
       isCorrect = normalized === expectedCode;
     } else {
-      // "digit"-typ
       isCorrect = isDigitAttempt && Number(normalized) === Number(expectedDigit ?? NaN);
     }
 
     const now = new Date();
 
-    // Räkna ut återstående tid vid submit (för logg)
+    // kvarvarande tid just nu (för loggen och adminvisning)
     const startedAtMs = (team.startedAt as Date | null)?.getTime() ?? Date.now();
     const penalties = Number((team.penaltiesSec as number | null) ?? 0);
     const deadline = new Date(startedAtMs + (DEFAULT_CLUE_SECONDS + penalties) * 1000);
     const timeLeftSec = Math.max(0, Math.floor((deadline.getTime() - now.getTime()) / 1000));
 
-    // INSERT i submissions enligt ditt schema (obs: inget clueId/answer)
-    const digitValue = isDigitAttempt ? Number(normalized) : -1; // fallback när kod används
+    // logga submission (din schema: digit/correct/timeLeftAtSubmit/submittedAt)
+    const digitValue = isDigitAttempt ? Number(normalized) : -1;
     await db.insert(submissions).values({
       teamId,
       digit: digitValue,
@@ -83,6 +80,7 @@ export async function POST(req: Request) {
         .returning();
 
       const updated = ret?.[0] ?? { id: teamId, step: Number(team.step ?? 0) + 1 };
+
       return NextResponse.json({
         ok: true,
         result: "correct",
@@ -90,11 +88,10 @@ export async function POST(req: Request) {
       });
     }
 
-    // Fel svar → cooldown + straff
+    // fel svar → cooldown + straff
     const lastWrongAt = team.lastWrongAt ? new Date(team.lastWrongAt) : null;
     const tooSoon = lastWrongAt && now.getTime() - lastWrongAt.getTime() < COOLDOWN_MS;
 
-    // Uppdatera låsning och straff
     const upd: any = { lastWrongAt: now };
     if (!tooSoon) {
       upd.penaltiesSec = Number(team.penaltiesSec ?? 0) + WRONG_PENALTY_SEC;

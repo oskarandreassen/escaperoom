@@ -9,10 +9,13 @@ import { teams, submissions, contentClues } from "@/lib/schema";
 import { eq, desc } from "drizzle-orm";
 import { CONFIG } from "@/lib/time";
 
+const ROUND_DURATION_SEC = 5 * 60; // 300 sekunder
+
 export async function GET() {
   try {
     const teamRows = await db.select().from(teams).orderBy(desc(teams.createdAt));
 
+    // Hämta alla submissions
     const allSubs = await db
       .select({
         id: submissions.id,
@@ -23,6 +26,7 @@ export async function GET() {
       })
       .from(submissions);
 
+    // Mappa fel och sista korrekta submission per team
     const wrongByTeam = new Map<string, number>();
     const lastCorrectByTeam = new Map<
       string,
@@ -43,39 +47,34 @@ export async function GET() {
       }
     }
 
+    // Räkna antal gåtor (inaktivt men för helhet)
     const activeClues = await db
       .select()
       .from(contentClues)
       .where(eq(contentClues.active, true));
     const totalClues = activeClues.length;
 
+    // Bygg output
     const teamsOut = teamRows.map((t) => {
       const startedAt = t.startedAt as Date | null;
       const completedAt = t.completedAt as Date | null;
       const penalties = Number((t.penaltiesSec as number | null) ?? 0);
-
       const last = lastCorrectByTeam.get(t.id);
 
-      let timeLeftAtFinishSec: number | null = null;
       let actualDurationSec: number | null = null;
 
       if (startedAt && completedAt) {
+        // Beräkna faktisk förbrukad tid (elapsed + penalties)
         const elapsedSec = Math.max(
           0,
           Math.floor((completedAt.getTime() - startedAt.getTime()) / 1000)
         );
         const usedSec = elapsedSec + penalties;
-
-        actualDurationSec = Math.min(CONFIG.ROUND_DURATION_SEC, Math.max(0, usedSec));
-        timeLeftAtFinishSec = Math.max(0, CONFIG.ROUND_DURATION_SEC - usedSec);
-      } else if (t.completedAt && last) {
-        // Fallback om start saknas: approx utifrån snapshot minus straff
-        const approxLeft = Math.max(0, Math.floor((last.timeLeftAtSubmit ?? 0) - penalties));
-        timeLeftAtFinishSec = approxLeft;
-        actualDurationSec = Math.min(
-          CONFIG.ROUND_DURATION_SEC,
-          CONFIG.ROUND_DURATION_SEC - approxLeft
-        );
+        actualDurationSec = Math.min(ROUND_DURATION_SEC, usedSec);
+      } else if (last) {
+        // Fallback om completedAt saknas
+        const usedSec = ROUND_DURATION_SEC - (last.timeLeftAtSubmit ?? 0) + penalties;
+        actualDurationSec = Math.min(ROUND_DURATION_SEC, Math.max(0, usedSec));
       }
 
       return {
@@ -89,8 +88,7 @@ export async function GET() {
         step: t.step ?? 0,
         totalClues,
         wrongGuesses: wrongByTeam.get(t.id) || 0,
-        timeLeftAtFinishSec, // behålls tills UI byter
-        actualDurationSec,   // ✅ ny: “hur lång tid det tog”
+        actualDurationSec, // ✅ visar tiden det tog istället för tid kvar
       };
     });
 

@@ -57,13 +57,12 @@ export async function POST(req: Request) {
 
     const now = new Date();
 
-    // === FIX: beräkna återstående tid med avdrag för straff (inte tillägg) ✅
+    // === Rättad tid med straff inräknad === ✅
     const startedAtMs = (team.startedAt as Date | null)?.getTime() ?? Date.now();
     const penalties = Number((team.penaltiesSec as number | null) ?? 0);
     const elapsedSec = Math.max(0, Math.floor((now.getTime() - startedAtMs) / 1000));
-    const timeLeftSec = Math.max(0, DEFAULT_CLUE_SECONDS - elapsedSec - penalties); // ✅ ändrat
+    const timeLeftSec = Math.max(0, DEFAULT_CLUE_SECONDS - elapsedSec - penalties);
 
-    // log submission (oförändrat)
     const digitValue = /^\d+$/.test(normalized) ? Number(normalized) : -1;
     await db.insert(submissions).values({
       teamId,
@@ -81,6 +80,18 @@ export async function POST(req: Request) {
       const ret = await db.update(teams).set(update).where(eq(teams.id, teamId)).returning();
       const updated = ret?.[0] ?? { id: teamId, step: (team.step ?? 0) + 1 };
 
+      // === NYTT BLOCK === ✅
+      // Om laget är klart, justera sista submissionen med strafftiden inkluderad
+      if (isLast) {
+        const totalElapsed = elapsedSec + penalties;
+        const adjustedLeft = Math.max(0, DEFAULT_CLUE_SECONDS - totalElapsed);
+
+        await db
+          .update(submissions)
+          .set({ timeLeftAtSubmit: adjustedLeft })
+          .where(eq(submissions.teamId, teamId));
+      }
+
       return NextResponse.json({
         ok: true,
         result: "correct",
@@ -90,7 +101,7 @@ export async function POST(req: Request) {
       });
     }
 
-    // wrong → cooldown + penalty (oförändrat)
+    // wrong → cooldown + penalty
     const lastWrongAt = team.lastWrongAt ? new Date(team.lastWrongAt) : null;
     const tooSoon = lastWrongAt && now.getTime() - lastWrongAt.getTime() < COOLDOWN_MS;
 

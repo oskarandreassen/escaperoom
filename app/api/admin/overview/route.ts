@@ -7,7 +7,6 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { teams, submissions, contentClues } from "@/lib/schema";
 import { eq, desc } from "drizzle-orm";
-import { CONFIG } from "@/lib/time";
 
 const ROUND_DURATION_SEC = 5 * 60; // 300 sekunder
 
@@ -15,7 +14,6 @@ export async function GET() {
   try {
     const teamRows = await db.select().from(teams).orderBy(desc(teams.createdAt));
 
-    // Hämta alla submissions
     const allSubs = await db
       .select({
         id: submissions.id,
@@ -26,7 +24,6 @@ export async function GET() {
       })
       .from(submissions);
 
-    // Mappa fel och sista korrekta submission per team
     const wrongByTeam = new Map<string, number>();
     const lastCorrectByTeam = new Map<
       string,
@@ -47,14 +44,12 @@ export async function GET() {
       }
     }
 
-    // Räkna antal gåtor (inaktivt men för helhet)
     const activeClues = await db
       .select()
       .from(contentClues)
       .where(eq(contentClues.active, true));
     const totalClues = activeClues.length;
 
-    // Bygg output
     const teamsOut = teamRows.map((t) => {
       const startedAt = t.startedAt as Date | null;
       const completedAt = t.completedAt as Date | null;
@@ -64,7 +59,6 @@ export async function GET() {
       let actualDurationSec: number | null = null;
 
       if (startedAt && completedAt) {
-        // Beräkna faktisk förbrukad tid (elapsed + penalties)
         const elapsedSec = Math.max(
           0,
           Math.floor((completedAt.getTime() - startedAt.getTime()) / 1000)
@@ -72,7 +66,6 @@ export async function GET() {
         const usedSec = elapsedSec + penalties;
         actualDurationSec = Math.min(ROUND_DURATION_SEC, usedSec);
       } else if (last) {
-        // Fallback om completedAt saknas
         const usedSec = ROUND_DURATION_SEC - (last.timeLeftAtSubmit ?? 0) + penalties;
         actualDurationSec = Math.min(ROUND_DURATION_SEC, Math.max(0, usedSec));
       }
@@ -88,7 +81,7 @@ export async function GET() {
         step: t.step ?? 0,
         totalClues,
         wrongGuesses: wrongByTeam.get(t.id) || 0,
-        actualDurationSec, // ✅ visar tiden det tog istället för tid kvar
+        actualDurationSec, // ✅ Tid det tog, inkl. straff
       };
     });
 

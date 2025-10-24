@@ -4,6 +4,8 @@ import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { teams } from "@/lib/schema";
+import { computeTimeLeft, CONFIG } from "@/lib/time";
+
 
 const DEFAULT_CLUE_SECONDS = 5 * 60;
 const QUESTIONS_PER_TEAM = 4;
@@ -80,12 +82,14 @@ export async function GET(req: Request) {
   }
 
   // Timer
-  const startedAtMs = (team.startedAt as Date | null)?.getTime() ?? Date.now();
-  const penalties = Number((team.penaltiesSec as number | null) ?? 0);
-  const deadline = new Date(startedAtMs + (DEFAULT_CLUE_SECONDS + penalties) * 1000);
-  const now = new Date();
-  const timeLeftSec = Math.max(0, Math.floor((deadline.getTime() - now.getTime()) / 1000));
+const startedAtMs = (team.startedAt as Date | null)?.getTime() ?? Date.now();
+const penalties = Number((team.penaltiesSec as number | null) ?? 0);
 
+// Räkna korrekt kvarvarande tid (drar av straff)
+const timeLeftSec = computeTimeLeft(Date.now(), startedAtMs, penalties);
+
+// Bygg deadline från "nu + kvarvarande tid" så klientens ticker funkar som idag
+const deadline = new Date(Date.now() + timeLeftSec * 1000);
   // Type comes from your file: "code" or "digit"
   const inferredType: "code" | "digit" =
     current?.type === "code" ? "code" : "digit";

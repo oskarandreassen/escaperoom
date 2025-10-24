@@ -17,7 +17,7 @@ export const CLUES: ClueConfig[] = [
     title: "Bastu",
     icon: "🜂",
     riddle:
-      "Där luften står still men andetagen blir tunga,\nOch sten möter eld i en viskande lunga.\nTrä klär väggar i tyst ceremoni,\nDär kroppen får rinna men själen bli fri.",
+      "Där luften står still men andetagen blir tunga,\nOch sten möter eld i en viskande lunga.\nNär ångan stiger avslöjar jag mitt svar,\n Det kanske blir svettigt, vem vågar ta ansvar?.",
     type: "digit",
     expected: "3",
     durationSec: 5 * 60,

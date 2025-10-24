@@ -66,9 +66,8 @@ export async function POST(req: Request) {
 
     // time left at submit
     const startedAtMs = (team.startedAt as Date | null)?.getTime() ?? Date.now();
-    const penalties = Math.max(0, Number((team.penaltiesSec as number | null) ?? 0 ));
-    const totalAllowed = Math.max(0, DEFAULT_CLUE_SECONDS - penalties);
-    const deadline = new Date(startedAtMs + totalAllowed * 1000);
+    const penalties = Number((team.penaltiesSec as number | null) ?? 0);
+    const deadline = new Date(startedAtMs + (DEFAULT_CLUE_SECONDS + penalties) * 1000);
     const timeLeftSec = Math.max(0, Math.floor((deadline.getTime() - now.getTime()) / 1000));
 
     // log submission

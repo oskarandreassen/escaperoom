@@ -11,10 +11,8 @@ import { CONFIG } from "@/lib/time";
 
 export async function GET() {
   try {
-    // Hämta alla lag (nyast först från DB för stabilitet)
     const teamRows = await db.select().from(teams).orderBy(desc(teams.createdAt));
 
-    // Hämta alla submissions en gång
     const allSubs = await db
       .select({
         id: submissions.id,
@@ -25,7 +23,6 @@ export async function GET() {
       })
       .from(submissions);
 
-    // Indexera fel och sista korrekta per lag
     const wrongByTeam = new Map<string, number>();
     const lastCorrectByTeam = new Map<
       string,
@@ -46,7 +43,6 @@ export async function GET() {
       }
     }
 
-    // Antal aktiva gåtor (endast referens i admin)
     const activeClues = await db
       .select()
       .from(contentClues)
@@ -58,25 +54,28 @@ export async function GET() {
       const completedAt = t.completedAt as Date | null;
       const penalties = Number((t.penaltiesSec as number | null) ?? 0);
 
-      // Fallback: sista korrekta submission (om tidsstämplar saknas)
       const last = lastCorrectByTeam.get(t.id);
 
-      // Korrekt beräkning som inkluderar straff
       let timeLeftAtFinishSec: number | null = null;
+      let actualDurationSec: number | null = null;
+
       if (startedAt && completedAt) {
         const elapsedSec = Math.max(
           0,
           Math.floor((completedAt.getTime() - startedAt.getTime()) / 1000)
         );
         const usedSec = elapsedSec + penalties;
+
+        actualDurationSec = Math.min(CONFIG.ROUND_DURATION_SEC, Math.max(0, usedSec));
         timeLeftAtFinishSec = Math.max(0, CONFIG.ROUND_DURATION_SEC - usedSec);
       } else if (t.completedAt && last) {
-        // Säkerhetsnät om startedAt saknas: approx baserat på sista submiten minus straff
-        const approx = Math.max(
-          0,
-          Math.floor((last.timeLeftAtSubmit ?? 0) - penalties)
+        // Fallback om start saknas: approx utifrån snapshot minus straff
+        const approxLeft = Math.max(0, Math.floor((last.timeLeftAtSubmit ?? 0) - penalties));
+        timeLeftAtFinishSec = approxLeft;
+        actualDurationSec = Math.min(
+          CONFIG.ROUND_DURATION_SEC,
+          CONFIG.ROUND_DURATION_SEC - approxLeft
         );
-        timeLeftAtFinishSec = approx;
       }
 
       return {
@@ -90,11 +89,11 @@ export async function GET() {
         step: t.step ?? 0,
         totalClues,
         wrongGuesses: wrongByTeam.get(t.id) || 0,
-        timeLeftAtFinishSec, // ✅ nu korrekt inkl. straff
+        timeLeftAtFinishSec, // behålls tills UI byter
+        actualDurationSec,   // ✅ ny: “hur lång tid det tog”
       };
     });
 
-    // Behåll “nyast först” även i svaret
     return NextResponse.json({ ok: true, teams: teamsOut });
   } catch (err: any) {
     console.error("overview GET failed:", err?.message || err);
